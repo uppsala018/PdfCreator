@@ -135,6 +135,9 @@ export default function EditorShell({ project }: EditorShellProps) {
   }, [exportState.phase])
 
   // ── Export PDF ────────────────────────────────────────────────────────────
+  // The API route returns the PDF binary directly (no Storage, no signed URL).
+  // We receive the ArrayBuffer, create a temporary Blob URL, and click a
+  // hidden anchor to trigger the browser's native file-download dialog.
   const handleExport = useCallback(async () => {
     setExportState({ phase: "exporting" })
 
@@ -145,9 +148,9 @@ export default function EditorShell({ project }: EditorShellProps) {
         body:    JSON.stringify({ projectId: project.id }),
       })
 
-      const json = (await res.json().catch(() => ({}))) as Record<string, unknown>
-
       if (!res.ok) {
+        // Error responses are still JSON.
+        const json = (await res.json().catch(() => ({}))) as Record<string, unknown>
         setExportState({
           phase: "error",
           error:
@@ -157,16 +160,27 @@ export default function EditorShell({ project }: EditorShellProps) {
         return
       }
 
-      const downloadUrl = json.url as string | undefined
-      if (!downloadUrl) {
-        setExportState({
-          phase: "error",
-          error: "No download URL returned from server.",
-        })
-        return
-      }
+      // Success — response body is the raw PDF binary.
+      const blob = await res.blob()
+      const blobUrl = URL.createObjectURL(blob)
 
-      window.open(downloadUrl, "_blank", "noopener,noreferrer")
+      // Derive a clean filename from the Content-Disposition header if present,
+      // otherwise fall back to the project title.
+      const disposition = res.headers.get("Content-Disposition") ?? ""
+      const match = disposition.match(/filename="([^"]+)"/)
+      const filename = match?.[1] ?? `${project.title ?? "ebook"}.pdf`
+
+      const anchor = document.createElement("a")
+      anchor.href     = blobUrl
+      anchor.download = filename
+      anchor.style.display = "none"
+      document.body.appendChild(anchor)
+      anchor.click()
+      document.body.removeChild(anchor)
+
+      // Release the object URL after a short delay so the download starts.
+      setTimeout(() => URL.revokeObjectURL(blobUrl), 10_000)
+
       setExportState({ phase: "success" })
     } catch (err) {
       setExportState({
@@ -177,7 +191,7 @@ export default function EditorShell({ project }: EditorShellProps) {
             : "Unexpected error during export.",
       })
     }
-  }, [project.id])
+  }, [project.id, project.title])
 
   // ── Render ────────────────────────────────────────────────────────────────
   return (
