@@ -1,7 +1,7 @@
 "use client"
 
-import { useCallback, useEffect, useState } from "react"
-import Link from "next/link"
+import { useCallback, useEffect, useRef, useState } from "react"
+import { useRouter } from "next/navigation"
 import {
   AlertCircle,
   ArrowLeft,
@@ -10,7 +10,7 @@ import {
   Loader2,
   X,
 } from "lucide-react"
-import BlockEditor from "@/components/editor/BlockEditor"
+import BlockEditor, { type BlockEditorRef } from "@/components/editor/BlockEditor"
 import type { Tables } from "@/lib/supabase/database.types"
 import type { Chapter } from "@/lib/project-schema"
 import { cn } from "@/lib/utils"
@@ -28,7 +28,6 @@ const THEME_LABEL: Record<string, string> = {
   "clean-minimal":  "Clean Minimal",
 }
 
-// Export button phases — never silent.
 type ExportPhase = "idle" | "exporting" | "success" | "error"
 interface ExportState {
   phase: ExportPhase
@@ -52,30 +51,21 @@ function extractChapters(content: unknown): Chapter[] {
 // ─── Component ────────────────────────────────────────────────────────────────
 
 export default function EditorShell({ project }: EditorShellProps) {
+  const router = useRouter()
   const initialChapters = extractChapters(project.content)
 
-  const [isDirty,      setIsDirty]      = useState(false)
-  const [exportState,  setExportState]  = useState<ExportState>({ phase: "idle" })
+  const [isDirty,     setIsDirty]     = useState(false)
+  const [exportState, setExportState] = useState<ExportState>({ phase: "idle" })
 
-  // ── Warn before navigating away with unsaved changes ───────────────────────
-  useEffect(() => {
-    function handleBeforeUnload(e: BeforeUnloadEvent) {
-      if (!isDirty) return
-      e.preventDefault()
-      e.returnValue = ""
-    }
-    window.addEventListener("beforeunload", handleBeforeUnload)
-    return () => window.removeEventListener("beforeunload", handleBeforeUnload)
-  }, [isDirty])
+  // Ref to BlockEditor — lets us call requestSave() before navigating away.
+  const editorRef = useRef<BlockEditorRef>(null)
 
-  // ── Auto-reset export button after success ─────────────────────────────────
-  useEffect(() => {
-    if (exportState.phase !== "success") return
-    const id = setTimeout(() => setExportState({ phase: "idle" }), 3_000)
-    return () => clearTimeout(id)
-  }, [exportState.phase])
+  // Stable ref so event handlers always read the latest isDirty value
+  // without being re-registered on every state change.
+  const isDirtyRef = useRef(isDirty)
+  isDirtyRef.current = isDirty
 
-  // ── Save ────────────────────────────────────────────────────────────────────
+  // ── Save callback (passed to BlockEditor) ─────────────────────────────────
   const handleSave = useCallback(
     async (chapters: Chapter[]) => {
       const res = await fetch(`/api/projects/${project.id}`, {
@@ -87,7 +77,8 @@ export default function EditorShell({ project }: EditorShellProps) {
       if (!res.ok) {
         const json = await res.json().catch(() => ({}))
         throw new Error(
-          (json as { error?: string }).error ?? `Save failed (HTTP ${res.status})`
+          (json as { error?: string }).error ??
+            `Save failed (HTTP ${res.status})`
         )
       }
 
@@ -96,7 +87,54 @@ export default function EditorShell({ project }: EditorShellProps) {
     [project.id]
   )
 
-  // ── Export PDF ──────────────────────────────────────────────────────────────
+  // ── Guard: browser close / hard refresh ───────────────────────────────────
+  useEffect(() => {
+    function handleBeforeUnload(e: BeforeUnloadEvent) {
+      if (!isDirtyRef.current) return
+      e.preventDefault()
+      e.returnValue = ""
+    }
+    window.addEventListener("beforeunload", handleBeforeUnload)
+    return () => window.removeEventListener("beforeunload", handleBeforeUnload)
+  }, [])  // no deps — reads isDirtyRef which is always current
+
+  // ── Save on tab hide (visibilitychange) ───────────────────────────────────
+  // Fires when the user switches tabs, minimises the window, or navigates
+  // away in some mobile browsers.  Uses fetch keepalive so the request
+  // completes even if the page is suspended immediately after.
+  useEffect(() => {
+    function handleVisibilityChange() {
+      if (document.visibilityState === "hidden" && isDirtyRef.current) {
+        editorRef.current?.requestSave().catch(() => {/* best-effort */})
+      }
+    }
+    document.addEventListener("visibilitychange", handleVisibilityChange)
+    return () =>
+      document.removeEventListener("visibilitychange", handleVisibilityChange)
+  }, [])  // no deps — reads refs which are always current
+
+  // ── Navigate back — save first if dirty ──────────────────────────────────
+  // The Link component uses the Next.js client router which does NOT fire
+  // beforeunload, so we intercept the click manually.
+  async function handleNavigateBack() {
+    if (isDirtyRef.current) {
+      try {
+        await editorRef.current?.requestSave()
+      } catch {
+        // Save failed — navigate anyway so the user is never trapped.
+      }
+    }
+    router.push("/dashboard")
+  }
+
+  // ── Auto-reset export button after success ────────────────────────────────
+  useEffect(() => {
+    if (exportState.phase !== "success") return
+    const id = setTimeout(() => setExportState({ phase: "idle" }), 3_000)
+    return () => clearTimeout(id)
+  }, [exportState.phase])
+
+  // ── Export PDF ────────────────────────────────────────────────────────────
   const handleExport = useCallback(async () => {
     setExportState({ phase: "exporting" })
 
@@ -107,66 +145,69 @@ export default function EditorShell({ project }: EditorShellProps) {
         body:    JSON.stringify({ projectId: project.id }),
       })
 
-      const json = await res.json().catch(() => ({})) as Record<string, unknown>
+      const json = (await res.json().catch(() => ({}))) as Record<string, unknown>
 
       if (!res.ok) {
         setExportState({
           phase: "error",
-          error: (json.error as string | undefined) ?? `Export failed (HTTP ${res.status})`,
+          error:
+            (json.error as string | undefined) ??
+            `Export failed (HTTP ${res.status})`,
         })
         return
       }
 
       const downloadUrl = json.url as string | undefined
       if (!downloadUrl) {
-        setExportState({ phase: "error", error: "No download URL returned from server." })
+        setExportState({
+          phase: "error",
+          error: "No download URL returned from server.",
+        })
         return
       }
 
-      // Open in a new tab — the signed URL has Content-Disposition: attachment
-      // so the browser will download the PDF rather than display it.
       window.open(downloadUrl, "_blank", "noopener,noreferrer")
-
       setExportState({ phase: "success" })
     } catch (err) {
       setExportState({
         phase: "error",
-        error: err instanceof Error ? err.message : "Unexpected error during export.",
+        error:
+          err instanceof Error
+            ? err.message
+            : "Unexpected error during export.",
       })
     }
   }, [project.id])
 
-  // ── Render ──────────────────────────────────────────────────────────────────
+  // ── Render ────────────────────────────────────────────────────────────────
   return (
     <div className="flex h-[calc(100vh-3.5rem)] flex-col overflow-hidden">
 
-      {/* ── Editor top bar ──────────────────────────────────────────────────── */}
+      {/* Editor top bar */}
       <div className="shrink-0 flex items-center gap-3 border-b border-[#1e3a52] bg-[#0a1929] px-4 h-11">
 
-        {/* Back */}
-        <Link
-          href="/dashboard"
+        {/* Back — saves before navigating */}
+        <button
+          type="button"
+          onClick={handleNavigateBack}
           className="flex items-center gap-1.5 text-xs text-slate-500 hover:text-white transition-colors shrink-0"
         >
           <ArrowLeft className="h-3.5 w-3.5" />
           My Projects
-        </Link>
+        </button>
 
         <span className="text-slate-700 text-xs">·</span>
 
-        {/* Project title */}
         <span className="text-sm font-semibold text-white truncate min-w-0 flex-1">
           {project.title}
         </span>
 
-        {/* Author */}
         {project.author && (
           <span className="hidden md:block text-xs text-slate-600 shrink-0">
             by {project.author}
           </span>
         )}
 
-        {/* Theme badge */}
         <span
           className={cn(
             "hidden sm:inline-flex items-center shrink-0 rounded-full px-2.5 py-0.5",
@@ -179,13 +220,10 @@ export default function EditorShell({ project }: EditorShellProps) {
           {THEME_LABEL[project.theme] ?? project.theme}
         </span>
 
-        {/* Export PDF button ─────────────────────────────────────────────────
-            Cycles through idle → exporting → success / error.
-            Never disabled silently — the user always knows what's happening. */}
         <ExportButton state={exportState} onClick={handleExport} />
       </div>
 
-      {/* ── Export error banner (below top bar, dismissible) ────────────────── */}
+      {/* Export error banner */}
       {exportState.phase === "error" && exportState.error && (
         <div className="shrink-0 flex items-center justify-between gap-3 border-b border-red-500/20 bg-red-500/5 px-4 py-2 text-xs">
           <div className="flex items-center gap-2 text-red-400 min-w-0">
@@ -203,9 +241,10 @@ export default function EditorShell({ project }: EditorShellProps) {
         </div>
       )}
 
-      {/* ── Three-panel BlockEditor ──────────────────────────────────────────── */}
+      {/* Three-panel BlockEditor */}
       <div className="flex-1 overflow-hidden">
         <BlockEditor
+          ref={editorRef}
           projectId={project.id}
           initialChapters={initialChapters}
           theme={project.theme}
@@ -219,7 +258,7 @@ export default function EditorShell({ project }: EditorShellProps) {
   )
 }
 
-// ─── Export button sub-component ─────────────────────────────────────────────
+// ─── Export button ────────────────────────────────────────────────────────────
 
 interface ExportButtonProps {
   state: ExportState
@@ -228,7 +267,6 @@ interface ExportButtonProps {
 
 function ExportButton({ state, onClick }: ExportButtonProps) {
   const { phase } = state
-
   return (
     <button
       type="button"
@@ -236,50 +274,17 @@ function ExportButton({ state, onClick }: ExportButtonProps) {
       disabled={phase === "exporting"}
       aria-label="Export project as PDF"
       className={cn(
-        "shrink-0 flex items-center gap-1.5 rounded-md border px-2.5 py-1 text-xs",
-        "transition-all duration-150",
-        phase === "idle" && [
-          "border-[#C9A84C]/40 text-[#C9A84C]",
-          "hover:bg-[#C9A84C]/10 hover:border-[#C9A84C]/70",
-        ],
-        phase === "exporting" && [
-          "border-[#1e3a52] text-slate-400 cursor-not-allowed",
-        ],
-        phase === "success" && [
-          "border-emerald-500/40 text-emerald-400 bg-emerald-500/5",
-        ],
-        phase === "error" && [
-          "border-red-500/40 text-red-400 hover:bg-red-500/10",
-        ],
+        "shrink-0 flex items-center gap-1.5 rounded-md border px-2.5 py-1 text-xs transition-all duration-150",
+        phase === "idle"      && "border-[#C9A84C]/40 text-[#C9A84C] hover:bg-[#C9A84C]/10 hover:border-[#C9A84C]/70",
+        phase === "exporting" && "border-[#1e3a52] text-slate-400 cursor-not-allowed",
+        phase === "success"   && "border-emerald-500/40 text-emerald-400 bg-emerald-500/5",
+        phase === "error"     && "border-red-500/40 text-red-400 hover:bg-red-500/10",
       )}
     >
-      {phase === "idle" && (
-        <>
-          <FileOutput className="h-3.5 w-3.5" />
-          Export PDF
-        </>
-      )}
-
-      {phase === "exporting" && (
-        <>
-          <Loader2 className="h-3.5 w-3.5 animate-spin" />
-          Exporting…
-        </>
-      )}
-
-      {phase === "success" && (
-        <>
-          <CheckCircle2 className="h-3.5 w-3.5" />
-          PDF Ready!
-        </>
-      )}
-
-      {phase === "error" && (
-        <>
-          <AlertCircle className="h-3.5 w-3.5" />
-          Retry Export
-        </>
-      )}
+      {phase === "idle"      && <><FileOutput    className="h-3.5 w-3.5" />Export PDF</>}
+      {phase === "exporting" && <><Loader2       className="h-3.5 w-3.5 animate-spin" />Exporting…</>}
+      {phase === "success"   && <><CheckCircle2  className="h-3.5 w-3.5" />PDF Ready!</>}
+      {phase === "error"     && <><AlertCircle   className="h-3.5 w-3.5" />Retry Export</>}
     </button>
   )
 }

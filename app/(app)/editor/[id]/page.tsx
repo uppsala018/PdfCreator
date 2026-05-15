@@ -4,6 +4,11 @@ import type { Metadata } from "next"
 import { createClient } from "@/lib/supabase/server"
 import EditorShell from "./EditorShell"
 
+// Always fetch the latest project from Supabase — never serve a cached snapshot.
+// Without this, Next.js App Router's prefetch cache can return stale content
+// when the user navigates back to a project they were just editing.
+export const dynamic = "force-dynamic"
+
 interface Props {
   params: { id: string }
 }
