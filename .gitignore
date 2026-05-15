@@ -34,3 +34,13 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# python
+__pycache__/
+*.py[cod]
+*.pyo
+.venv/
+venv/
+
+# pdf engine — generated test output
+pdf-engine/*.pdf
