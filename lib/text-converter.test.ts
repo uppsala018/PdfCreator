@@ -7,7 +7,7 @@ import type { Block } from "./project-schema"
 /** Strip generated IDs so we can compare block content without caring about UUIDs. */
 type NoId = Omit<Block, "id">
 function noIds(blocks: Block[]): NoId[] {
-  return blocks.map(({ id: _id, ...rest }) => rest)
+  return blocks.map(({ id: _, ...rest }) => rest)
 }
 
 /** Build a minimal block for use as blocksToText input. */
@@ -331,7 +331,7 @@ describe("invertibility — blocks → text → blocks", () => {
     const text = blocksToText([block])
     const result = textToBlocks(text)
     expect(result).toHaveLength(1)
-    const { id: _id, ...rest } = result[0]
+    const { id: _, ...rest } = result[0]
     return rest
   }
 

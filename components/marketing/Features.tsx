@@ -6,9 +6,6 @@ import {
   Download,
   Cloud,
   GripVertical,
-  Wand2,
-  BookOpen,
-  Zap,
 } from "lucide-react"
 
 const FEATURES = [
