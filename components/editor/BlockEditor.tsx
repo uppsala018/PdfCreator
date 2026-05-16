@@ -57,6 +57,8 @@ import { blocksToText } from "@/lib/text-converter"
 
 export interface BlockEditorRef {
   requestSave: () => Promise<void>
+  replaceChapters: (chapters: Chapter[]) => void
+  getChapters: () => Chapter[]
 }
 
 export interface BlockEditorProps {
@@ -67,6 +69,8 @@ export interface BlockEditorProps {
   website?: string | null
   onSave: (chapters: Chapter[]) => Promise<void>
   onDirtyChange?: (dirty: boolean) => void
+  onRequestImportPdf?: () => void
+  onRequestProfessionalExport?: () => void
 }
 
 type SaveStatus = "idle" | "saving" | "saved" | "error"
@@ -110,6 +114,29 @@ const BLOCK_MENU: Array<{ type: BlockType; label: string; separator?: boolean }>
   { type: "page_break",      label: "Page Break" },
   { type: "chapter_divider", label: "Chapter Divider" },
 ]
+
+const ONBOARDING_ACTIONS = [
+  {
+    title: "Generate AI Draft",
+    description: "Create a structured starting point with chapters, callouts, and CTAs.",
+    tone: "accent" as const,
+  },
+  {
+    title: "Start Writing",
+    description: "Open the text editor and build the chapter by hand.",
+    tone: "neutral" as const,
+  },
+  {
+    title: "Import PDF",
+    description: "Return to the dashboard to import a finished PDF for repair.",
+    tone: "muted" as const,
+  },
+  {
+    title: "Professional Composer Export",
+    description: "Export the current project as a polished premium PDF.",
+    tone: "gold" as const,
+  },
+] as const
 
 function makeBlock(type: BlockType): Block {
   const base = { id: uuidv4(), type, content: "" }
@@ -202,6 +229,68 @@ function AddBlockButton({ onAdd }: { onAdd: (t: BlockType) => void }) {
         ))}
       </DropdownMenuContent>
     </DropdownMenu>
+  )
+}
+
+function EmptyStateOnboarding({
+  onGenerateDraft,
+  onStartWriting,
+  onImportPdf,
+  onProfessionalExport,
+}: {
+  onGenerateDraft: () => void
+  onStartWriting: () => void
+  onImportPdf: () => void
+  onProfessionalExport: () => void
+}) {
+  return (
+    <div className="mx-auto w-full max-w-3xl rounded-2xl border border-[#1e3a52] bg-[#07111f] p-4 shadow-[0_12px_40px_rgba(0,0,0,0.22)] sm:p-5">
+      <div className="flex flex-col gap-2 border-b border-[#1e3a52] pb-4">
+        <p className="text-xs uppercase tracking-[0.18em] text-slate-500">Getting started</p>
+        <h2 className="text-lg font-semibold text-white">Choose your first workflow</h2>
+        <p className="max-w-2xl text-sm leading-6 text-slate-400">
+          Start from a draft, write from scratch, import a finished PDF for repair, or export with the Professional Composer.
+        </p>
+      </div>
+      <div className="mt-4 grid gap-3 sm:grid-cols-2">
+        {ONBOARDING_ACTIONS.map((action) => (
+          <div
+            key={action.title}
+            className={cn(
+              "rounded-xl border p-3",
+              action.tone === "accent" && "border-teal-400/20 bg-teal-400/5",
+              action.tone === "neutral" && "border-[#1e3a52] bg-white/[0.02]",
+              action.tone === "muted" && "border-slate-700/70 bg-slate-950/20",
+              action.tone === "gold" && "border-[#C9A84C]/20 bg-[#C9A84C]/5"
+            )}
+          >
+            <p className="text-sm font-medium text-white">{action.title}</p>
+            <p className="mt-1 text-xs leading-5 text-slate-400">{action.description}</p>
+          </div>
+        ))}
+      </div>
+      <div className="mt-4 grid gap-2 sm:grid-cols-2">
+        <Button type="button" onClick={onGenerateDraft} className="justify-start bg-teal-500 text-[#07111f] hover:bg-teal-400">
+          <Sparkles className="mr-2 h-3.5 w-3.5" />
+          Generate AI Draft
+        </Button>
+        <Button type="button" onClick={onStartWriting} variant="outline" className="justify-start border-[#1e3a52] bg-transparent text-slate-200 hover:bg-white/5 hover:text-white">
+          <FileText className="mr-2 h-3.5 w-3.5" />
+          Start Writing
+        </Button>
+        <Button type="button" onClick={onImportPdf} variant="outline" className="justify-start border-[#1e3a52] bg-transparent text-slate-200 hover:bg-white/5 hover:text-white">
+          <Upload className="mr-2 h-3.5 w-3.5" />
+          Import PDF
+        </Button>
+        <Button type="button" onClick={onProfessionalExport} className="justify-start bg-[#C9A84C] text-[#07111f] hover:bg-[#e0b85a]">
+          <FileDown className="mr-2 h-3.5 w-3.5" />
+          Professional Composer Export
+        </Button>
+      </div>
+      <p className="mt-3 text-xs leading-5 text-slate-500">
+        Tip: AI draft generation gives you a structured start, while the Professional Composer produces the polished export.
+      </p>
+    </div>
   )
 }
 
@@ -350,6 +439,8 @@ const BlockEditor = forwardRef<BlockEditorRef, BlockEditorProps>(
       website,
       onSave,
       onDirtyChange,
+      onRequestImportPdf,
+      onRequestProfessionalExport,
     },
     ref
   ) {
@@ -409,7 +500,25 @@ const BlockEditor = forwardRef<BlockEditorRef, BlockEditorProps>(
       }
     }, [onSave])
 
-    useImperativeHandle(ref, () => ({ requestSave: handleSave }), [handleSave])
+    const replaceChapters = useCallback((nextChapters: Chapter[]) => {
+      const safeChapters = nextChapters.length > 0 ? nextChapters : [makeChapter(1)]
+      setChapters(safeChapters)
+      setSelectedChapterId(safeChapters[0]?.id ?? null)
+      setDirtyChapterIds(new Set())
+      setSaveStatus("saved")
+      setTextMode(null)
+      setAiPrefillText(undefined)
+    }, [])
+
+    useImperativeHandle(
+      ref,
+      () => ({
+        requestSave: handleSave,
+        replaceChapters,
+        getChapters: () => chaptersRef.current,
+      }),
+      [handleSave, replaceChapters]
+    )
 
     // True 30-second auto-save — stable interval, never reset by edits.
     useEffect(() => {
@@ -755,15 +864,20 @@ const BlockEditor = forwardRef<BlockEditorRef, BlockEditorProps>(
                     Select a chapter to edit its blocks
                   </p>
                 ) : selectedChapter.blocks.length === 0 ? (
-                  <div className="flex h-40 flex-col items-center justify-center gap-3 text-sm text-slate-600">
-                    <p>This chapter has no blocks yet.</p>
-                    <p className="text-xs text-slate-700">
-                      Use{" "}
-                      <span className="text-[#C9A84C]">Edit as Text</span> or{" "}
-                      <span className="text-sky-400">Upload File</span> above,
-                      or add individual blocks below.
-                    </p>
-                    <AddBlockButton onAdd={addBlock} />
+                  <div className="space-y-4 py-2">
+                    <EmptyStateOnboarding
+                      onGenerateDraft={() => setShowAiDialog(true)}
+                      onStartWriting={() => setTextMode("edit")}
+                      onImportPdf={() => onRequestImportPdf?.()}
+                      onProfessionalExport={() => onRequestProfessionalExport?.()}
+                    />
+                    <div className="flex flex-col items-center justify-center gap-3 rounded-xl border border-dashed border-[#1e3a52] bg-white/[0.02] px-4 py-5 text-center text-sm text-slate-500">
+                      <p className="text-slate-300">This chapter has no blocks yet.</p>
+                      <p className="max-w-xl text-xs leading-5 text-slate-500">
+                        Use the actions above to generate a draft, start writing, import a finished PDF, or export professionally.
+                      </p>
+                      <AddBlockButton onAdd={addBlock} />
+                    </div>
                   </div>
                 ) : (
                   <DndContext

@@ -324,6 +324,35 @@ r = client.post(
 )
 check("dark_cinematic (underscores) accepted â†’ 200", r.status_code == 200)
 
+# Professional composer endpoint
+professional_ebook = {
+    "title": "Professional Export Test",
+    "subtitle": "Structured composer route",
+    "brand": "Ebook Studio",
+    "theme": "black_gold",
+    "chapters": [{
+        "title": "Composer Chapter",
+        "intro": "A short structured chapter.",
+        "sections": [{
+            "title": "Composer Section",
+            "blocks": [
+                {"type": "paragraph", "text": "Professional composer paragraph."},
+                {"type": "tip_box", "text": "Professional composer tip."},
+                {"type": "cta_box", "text": "Export with the professional composer."},
+            ],
+        }],
+    }],
+}
+r = client.post(
+    "/generate-professional",
+    data=json.dumps({"ebook": professional_ebook}),
+    content_type="application/json",
+)
+check("POST /generate-professional â†’ 200", r.status_code == 200)
+check("professional response content-type is PDF", "application/pdf" in r.content_type)
+check("professional PDF body starts with %PDF", r.data[:4] == b"%PDF")
+check("professional diagnostics header present", bool(r.headers.get("X-Composer-Diagnostics")))
+
 # â”€â”€ Summary â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 total  = len(results)
