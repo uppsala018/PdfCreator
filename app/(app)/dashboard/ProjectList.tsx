@@ -407,6 +407,7 @@ export default function ProjectList({
         bucket?: string
         storagePath?: string
         token?: string
+        signedUrl?: string
       }
 
       if (!uploadInfo.bucket || !uploadInfo.storagePath || !uploadInfo.token) {

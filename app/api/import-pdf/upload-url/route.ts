@@ -9,6 +9,22 @@ function safeFilename(name: string): string {
   return name.replace(/[^a-z0-9\-_. ]/gi, "_").trim() || "imported.pdf"
 }
 
+function storageErrorInfo(error: unknown) {
+  if (!error || typeof error !== "object") return null
+  const value = error as {
+    name?: unknown
+    message?: unknown
+    status?: unknown
+    statusCode?: unknown
+  }
+  return {
+    name: typeof value.name === "string" ? value.name : undefined,
+    message: typeof value.message === "string" ? value.message : undefined,
+    status: value.status,
+    statusCode: value.statusCode,
+  }
+}
+
 function missingConfig(): string[] {
   return [
     "NEXT_PUBLIC_SUPABASE_URL",
@@ -77,8 +93,16 @@ export async function POST(request: NextRequest) {
   const filename = typeof body?.filename === "string" ? body.filename : ""
   const size = typeof body?.size === "number" ? body.size : 0
   const contentType = typeof body?.contentType === "string" ? body.contentType : ""
+  const cleanFilename = safeFilename(filename)
 
-  if (!filename.toLowerCase().endsWith(".pdf") && contentType !== "application/pdf") {
+  if (!cleanFilename || cleanFilename === "imported.pdf") {
+    return NextResponse.json(
+      { code: "INVALID_PDF", error: "PDF filename is missing or invalid." },
+      { status: 400 }
+    )
+  }
+
+  if (!cleanFilename.toLowerCase().endsWith(".pdf") && contentType !== "application/pdf") {
     return NextResponse.json(
       { code: "INVALID_PDF", error: "Only PDF files are supported." },
       { status: 400 }
@@ -101,64 +125,44 @@ export async function POST(request: NextRequest) {
     supabaseUrl: process.env.NEXT_PUBLIC_SUPABASE_URL ?? null,
     bucketExists: Boolean(bucket && !bucketError),
     bucketName: bucket?.name ?? null,
-    error: bucketError
-      ? {
-          name: bucketError.name,
-          message: bucketError.message,
-          status: "status" in bucketError ? bucketError.status : undefined,
-          statusCode: "statusCode" in bucketError ? bucketError.statusCode : undefined,
-        }
-      : null,
+    error: storageErrorInfo(bucketError),
   })
 
   if (bucketError) {
-    console.error("[import-pdf:upload-url] BUCKET_FAILURE getBucket(imports) exact error", bucketError)
-    return NextResponse.json(
-      withDevDebug(
-        {
-          code: "BUCKET_FAILURE",
-          error: "Supabase Storage bucket `imports` is missing or inaccessible. Create it manually as a private bucket and verify Storage policies.",
-          detail: bucketError.message,
-        },
-        debugInfo({
-          bucketExists: false,
-          storageError: {
-            name: bucketError.name,
-            message: bucketError.message,
-            status: "status" in bucketError ? bucketError.status : undefined,
-            statusCode: "statusCode" in bucketError ? bucketError.statusCode : undefined,
-          },
-        })
-      ),
-      { status: 500 }
-    )
+    console.warn("[import-pdf:upload-url] getBucket(imports) returned an error; continuing to createSignedUploadUrl", bucketError)
   }
 
-  const storagePath = `${user.id}/${Date.now()}-${crypto.randomUUID()}-${safeFilename(filename)}`
+  const storagePath = `${user.id}/${Date.now()}-${crypto.randomUUID()}-${cleanFilename}`
+  console.info("[import-pdf:upload-url] createSignedUploadUrl request", {
+    bucket: IMPORT_BUCKET,
+    storagePath,
+    pathStartsWithSlash: storagePath.startsWith("/"),
+    pathStartsWithBucketName: storagePath.startsWith(`${IMPORT_BUCKET}/`),
+  })
+
   const { data, error } = await service.storage
     .from(IMPORT_BUCKET)
     .createSignedUploadUrl(storagePath)
 
   if (error || !data) {
-    console.error("[import-pdf:upload-url] SIGNED_UPLOAD_FAILURE createSignedUploadUrl(imports) exact error", error)
+    const exactError = storageErrorInfo(error)
+    console.error("[import-pdf:upload-url] SIGNED_UPLOAD_FAILURE createSignedUploadUrl(imports) exact error", {
+      bucket: IMPORT_BUCKET,
+      storagePath,
+      error: exactError,
+      rawError: error,
+    })
     return NextResponse.json(
       withDevDebug(
         {
           code: "UPLOAD_FAILURE",
-          error: "Storage upload failed: could not create a direct upload URL.",
+          error: error?.message ?? "Storage upload failed: could not create a direct upload URL.",
           detail: error?.message,
         },
         debugInfo({
-          bucketExists: true,
+          bucketExists: Boolean(bucket && !bucketError),
           storagePath,
-          storageError: error
-            ? {
-                name: error.name,
-                message: error.message,
-                status: "status" in error ? error.status : undefined,
-                statusCode: "statusCode" in error ? error.statusCode : undefined,
-              }
-            : null,
+          storageError: exactError,
         })
       ),
       { status: 500 }
@@ -169,5 +173,6 @@ export async function POST(request: NextRequest) {
     bucket: IMPORT_BUCKET,
     storagePath: data.path,
     token: data.token,
+    signedUrl: data.signedUrl,
   })
 }
