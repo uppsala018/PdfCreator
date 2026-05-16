@@ -17,6 +17,7 @@ import {
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
+import { createClient } from "@/lib/supabase/client"
 import {
   Dialog,
   DialogContent,
@@ -44,6 +45,8 @@ type ImportPdfError = {
   code?: string
   detail?: string
 }
+
+const MAX_IMPORT_PDF_BYTES = 50 * 1024 * 1024
 
 function formatImportError(value: unknown): string {
   const json = value as ImportPdfError
@@ -357,20 +360,86 @@ export default function ProjectList({
       return
     }
 
+    if (importFile.type !== "application/pdf" && !importFile.name.toLowerCase().endsWith(".pdf")) {
+      setImportError("Only PDF files are supported.")
+      return
+    }
+
+    if (importFile.size <= 0 || importFile.size > MAX_IMPORT_PDF_BYTES) {
+      setImportError("PDF is too large for browser upload/storage. Maximum size is 50 MB.")
+      return
+    }
+
     setIsImporting(true)
     setImportError(null)
 
     try {
-      const data = new FormData()
-      data.set("file", importFile)
+      const supabase = createClient()
+      const {
+        data: { user },
+        error: userError,
+      } = await supabase.auth.getUser()
+
+      if (userError || !user) {
+        setImportError("You are not authenticated. Sign in again, then import the PDF.")
+        setIsImporting(false)
+        return
+      }
+
+      const uploadUrlRes = await fetch("/api/import-pdf/upload-url", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          filename: importFile.name,
+          size: importFile.size,
+          contentType: importFile.type || "application/pdf",
+        }),
+      })
+
+      const uploadUrlJson = await uploadUrlRes.json().catch(() => ({}))
+      if (!uploadUrlRes.ok) {
+        setImportError(formatImportError(uploadUrlJson))
+        setIsImporting(false)
+        return
+      }
+
+      const uploadInfo = uploadUrlJson as {
+        bucket?: string
+        storagePath?: string
+        token?: string
+      }
+
+      if (!uploadInfo.bucket || !uploadInfo.storagePath || !uploadInfo.token) {
+        setImportError("Supabase upload failed: direct upload URL response was incomplete.")
+        setIsImporting(false)
+        return
+      }
+
+      const { error: uploadError } = await supabase.storage
+        .from(uploadInfo.bucket)
+        .uploadToSignedUrl(uploadInfo.storagePath, uploadInfo.token, importFile, {
+          contentType: importFile.type || "application/pdf",
+          upsert: false,
+        })
+
+      if (uploadError) {
+        setImportError(`Supabase upload failed: ${uploadError.message}`)
+        setIsImporting(false)
+        return
+      }
 
       const res = await fetch("/api/import-pdf", {
         method: "POST",
-        body: data,
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          filename: importFile.name,
+          storagePath: uploadInfo.storagePath,
+          size: importFile.size,
+          contentType: importFile.type || "application/pdf",
+        }),
       })
 
       const json = await res.json().catch(() => ({}))
-
       if (!res.ok) {
         setImportError(formatImportError(json))
         setIsImporting(false)

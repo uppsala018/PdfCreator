@@ -11,10 +11,18 @@ type ImportErrorCode =
   | "UNAUTHENTICATED"
   | "INVALID_REQUEST"
   | "INVALID_PDF"
-  | "BUCKET_FAILURE"
   | "UPLOAD_FAILURE"
   | "PROJECT_CREATE_FAILURE"
   | "UNEXPECTED_ERROR"
+
+type ImportMetadataBody = {
+  filename?: unknown
+  storagePath?: unknown
+  size?: unknown
+  contentType?: unknown
+  pageCount?: unknown
+  pageSize?: unknown
+}
 
 function logImportError(code: ImportErrorCode, message: string, detail?: unknown) {
   console.error("[import-pdf]", code, message, detail ?? "")
@@ -44,38 +52,24 @@ function missingConfig(): string[] {
   ].filter((key) => !process.env[key])
 }
 
-function isBucketAlreadyExists(error: { message?: string; statusCode?: string } | null) {
-  if (!error) return false
-  const message = error.message?.toLowerCase() ?? ""
-  return (
-    error.statusCode === "409" ||
-    message.includes("already exists") ||
-    message.includes("duplicate") ||
-    message.includes("resource already exists")
-  )
-}
-
 function safeFilename(name: string): string {
   return name.replace(/[^a-z0-9\-_. ]/gi, "_").trim() || "imported.pdf"
 }
 
-function extractPdfMetadata(bytes: ArrayBuffer): {
-  pageCount: number | null
-  pageSize: ImportedPdfPageSize | null
-} {
-  const text = Buffer.from(bytes).toString("latin1")
-  const pageMatches = text.match(/\/Type\s*\/Page\b/g)
-  const mediaBoxMatch = text.match(/\/MediaBox\s*\[\s*0\s+0\s+([\d.]+)\s+([\d.]+)\s*\]/)
-
+function parsePageSize(value: unknown): ImportedPdfPageSize | null {
+  if (typeof value !== "object" || value === null) return null
+  const pageSize = value as { width?: unknown; height?: unknown; unit?: unknown }
+  if (
+    typeof pageSize.width !== "number" ||
+    typeof pageSize.height !== "number" ||
+    pageSize.unit !== "pt"
+  ) {
+    return null
+  }
   return {
-    pageCount: pageMatches?.length ?? null,
-    pageSize: mediaBoxMatch
-      ? {
-          width: Number(mediaBoxMatch[1]),
-          height: Number(mediaBoxMatch[2]),
-          unit: "pt",
-        }
-      : null,
+    width: pageSize.width,
+    height: pageSize.height,
+    unit: "pt",
   }
 }
 
@@ -103,91 +97,89 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    let formData: FormData
+    let body: ImportMetadataBody
     try {
-      formData = await request.formData()
+      body = (await request.json()) as ImportMetadataBody
     } catch (err) {
-      logImportError("INVALID_REQUEST", "Import request was not multipart/form-data", err)
+      logImportError("INVALID_REQUEST", "Import metadata request was not valid JSON", err)
+      return errorResponse("INVALID_REQUEST", "Import metadata request must be JSON.", 400)
+    }
+
+    const filename = typeof body.filename === "string" ? body.filename : ""
+    const storagePath = typeof body.storagePath === "string" ? body.storagePath : ""
+    const size = typeof body.size === "number" ? body.size : 0
+    const contentType = typeof body.contentType === "string" ? body.contentType : ""
+
+    if (!filename || !storagePath) {
       return errorResponse(
         "INVALID_REQUEST",
-        "Import request must be multipart/form-data.",
+        "Import metadata must include filename and storagePath.",
         400
       )
     }
 
-    const file = formData.get("file")
-    if (!(file instanceof File)) {
-      logImportError("INVALID_PDF", "Import request did not include a file")
-      return errorResponse("INVALID_PDF", "PDF file is required.", 400)
-    }
-
-    if (file.type !== "application/pdf" && !file.name.toLowerCase().endsWith(".pdf")) {
-      logImportError("INVALID_PDF", "Rejected non-PDF upload", {
-        name: file.name,
-        type: file.type,
+    if (!filename.toLowerCase().endsWith(".pdf") && contentType !== "application/pdf") {
+      logImportError("INVALID_PDF", "Rejected non-PDF import metadata", {
+        filename,
+        contentType,
       })
       return errorResponse("INVALID_PDF", "Only PDF files are supported.", 400)
     }
 
-    if (file.size <= 0 || file.size > MAX_PDF_BYTES) {
-      logImportError("INVALID_PDF", "Rejected PDF because file size is outside limits", {
-        name: file.name,
-        size: file.size,
+    if (size <= 0 || size > MAX_PDF_BYTES) {
+      logImportError("INVALID_PDF", "Rejected PDF metadata because file size is outside limits", {
+        filename,
+        size,
       })
       return errorResponse(
         "INVALID_PDF",
-        "PDF must be larger than 0 bytes and no more than 50 MB.",
+        "PDF is too large for browser upload/storage. Maximum size is 50 MB.",
         400
       )
     }
 
-    const bytes = await file.arrayBuffer()
-    const metadata = extractPdfMetadata(bytes)
-    const projectId = crypto.randomUUID()
-    const filename = safeFilename(file.name)
-    const storagePath = `${user.id}/${projectId}/${filename}`
-    const service = createServiceClient()
-
-    const { error: bucketError } = await service.storage.createBucket(IMPORT_BUCKET, {
-      public: false,
-    })
-    if (bucketError && !isBucketAlreadyExists(bucketError)) {
-      logImportError("BUCKET_FAILURE", "Could not create or verify imports bucket", bucketError)
+    if (!storagePath.startsWith(`${user.id}/`)) {
+      logImportError("INVALID_REQUEST", "Storage path does not belong to authenticated user", {
+        userId: user.id,
+        storagePath,
+      })
       return errorResponse(
-        "BUCKET_FAILURE",
-        "Storage bucket failure: could not create or verify the private imports bucket.",
-        500,
-        bucketError.message
+        "INVALID_REQUEST",
+        "Import storage path does not belong to the authenticated user.",
+        403
       )
     }
 
-    const { error: uploadError } = await service.storage
+    const service = createServiceClient()
+    const { data: objectExists, error: objectError } = await service.storage
       .from(IMPORT_BUCKET)
-      .upload(storagePath, bytes, {
-        contentType: "application/pdf",
-        upsert: false,
-      })
+      .exists(storagePath)
 
-    if (uploadError) {
-      logImportError("UPLOAD_FAILURE", "Storage upload failed", uploadError)
+    if (objectError || !objectExists) {
+      logImportError("UPLOAD_FAILURE", "Uploaded PDF object could not be verified", objectError)
       return errorResponse(
         "UPLOAD_FAILURE",
-        "Storage upload failed: the PDF could not be saved.",
+        "Supabase upload failed: the uploaded PDF could not be verified.",
         500,
-        uploadError.message
+        objectError?.message
       )
     }
+
+    const projectId = crypto.randomUUID()
+    const safeTitle = safeFilename(filename).replace(/\.pdf$/i, "")
+    const pageCount = typeof body.pageCount === "number" ? body.pageCount : null
+    const pageSize = parsePageSize(body.pageSize)
 
     const content: ProjectContent = {
       projectType: "imported_pdf",
       chapters: [],
       importedPdf: {
         status: "imported",
-        originalFilename: file.name,
+        originalFilename: filename,
         storageBucket: IMPORT_BUCKET,
         storagePath,
-        pageCount: metadata.pageCount,
-        pageSize: metadata.pageSize,
+        pageCount,
+        pageSize,
         importedAt: new Date().toISOString(),
       },
       layoutEditState: {
@@ -204,7 +196,7 @@ export async function POST(request: NextRequest) {
       .insert({
         id: projectId,
         user_id: user.id,
-        title: filename.replace(/\.pdf$/i, ""),
+        title: safeTitle,
         theme: "clean-minimal",
         template: "imported-pdf",
         content: content as unknown as Json,
@@ -213,8 +205,7 @@ export async function POST(request: NextRequest) {
       .single()
 
     if (insertError) {
-      await service.storage.from(IMPORT_BUCKET).remove([storagePath])
-      logImportError("PROJECT_CREATE_FAILURE", "Imported PDF uploaded but project creation failed", insertError)
+      logImportError("PROJECT_CREATE_FAILURE", "Uploaded PDF verified but project creation failed", insertError)
       return errorResponse(
         "PROJECT_CREATE_FAILURE",
         "Project creation failed after the PDF was uploaded.",
