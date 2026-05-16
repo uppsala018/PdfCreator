@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation"
 import {
   BookOpen,
   Plus,
+  Upload,
   Trash2,
   ArrowRight,
   Clock,
@@ -34,6 +35,7 @@ export type ProjectSummary = {
   author: string | null
   theme: string
   template: string
+  content?: unknown
   updated_at: string
 }
 
@@ -161,13 +163,19 @@ function ProjectCard({
   project: ProjectSummary
   onDeleteClick: (id: string) => void
 }) {
+  const isImportedPdf =
+    typeof project.content === "object" &&
+    project.content !== null &&
+    "projectType" in project.content &&
+    (project.content as { projectType?: unknown }).projectType === "imported_pdf"
+
   return (
     <div className="group relative flex flex-col rounded-xl border border-[#1e3a52] bg-[#0a1929] hover:border-[#2a4d6e] transition-colors">
       {/* Theme badge */}
       <div className="px-5 pt-5 pb-0 flex items-start justify-between gap-2">
         <span className="inline-flex items-center gap-1.5 rounded-full border border-[#C9A84C]/30 bg-[#C9A84C]/5 px-2.5 py-1 text-[11px] font-medium text-[#C9A84C]">
           <FileText className="w-3 h-3" />
-          {THEME_LABEL[project.theme] ?? project.theme}
+          {isImportedPdf ? "Imported PDF" : THEME_LABEL[project.theme] ?? project.theme}
         </span>
 
         <button
@@ -223,7 +231,7 @@ function ProjectCard({
 
 // ─── Empty state ──────────────────────────────────────────────────────────────
 
-function EmptyState({ onNew }: { onNew: () => void }) {
+function EmptyState({ onNew, onImport }: { onNew: () => void; onImport: () => void }) {
   return (
     <div className="flex flex-col items-center justify-center py-24 text-center">
       <div className="mb-5 w-16 h-16 rounded-2xl bg-[#C9A84C]/10 border border-[#C9A84C]/20 flex items-center justify-center">
@@ -233,13 +241,23 @@ function EmptyState({ onNew }: { onNew: () => void }) {
       <p className="mt-2 text-sm text-slate-500 max-w-xs">
         Create your first ebook and start writing in minutes.
       </p>
-      <Button
-        onClick={onNew}
-        className="mt-6 bg-[#C9A84C] hover:bg-[#e0b85a] text-[#0D1B2A] font-semibold"
-      >
-        <Plus className="w-4 h-4 mr-1.5" />
-        Create first project
-      </Button>
+      <div className="mt-6 flex items-center gap-2">
+        <Button
+          variant="outline"
+          onClick={onImport}
+          className="border-[#1e3a52] bg-transparent text-slate-300 hover:bg-white/5 hover:text-white"
+        >
+          <Upload className="w-4 h-4 mr-1.5" />
+          Import PDF
+        </Button>
+        <Button
+          onClick={onNew}
+          className="bg-[#C9A84C] hover:bg-[#e0b85a] text-[#0D1B2A] font-semibold"
+        >
+          <Plus className="w-4 h-4 mr-1.5" />
+          Create first project
+        </Button>
+      </div>
     </div>
   )
 }
@@ -259,6 +277,10 @@ export default function ProjectList({
   const [form, setForm] = useState<NewProjectForm>(EMPTY_FORM)
   const [isCreating, setIsCreating] = useState(false)
   const [createError, setCreateError] = useState<string | null>(null)
+  const [showImportDialog, setShowImportDialog] = useState(false)
+  const [importFile, setImportFile] = useState<File | null>(null)
+  const [isImporting, setIsImporting] = useState(false)
+  const [importError, setImportError] = useState<string | null>(null)
 
   const [deleteTargetId, setDeleteTargetId] = useState<string | null>(null)
   const [isDeleting, setIsDeleting] = useState(false)
@@ -306,6 +328,40 @@ export default function ProjectList({
     } catch {
       setCreateError("Network error. Please try again.")
       setIsCreating(false)
+    }
+  }
+
+  async function handleImportPdf() {
+    if (!importFile) {
+      setImportError("Choose a PDF file to import.")
+      return
+    }
+
+    setIsImporting(true)
+    setImportError(null)
+
+    try {
+      const data = new FormData()
+      data.set("file", importFile)
+
+      const res = await fetch("/api/import-pdf", {
+        method: "POST",
+        body: data,
+      })
+
+      const json = await res.json().catch(() => ({}))
+
+      if (!res.ok) {
+        setImportError((json as { error?: string }).error ?? "Failed to import PDF.")
+        setIsImporting(false)
+        return
+      }
+
+      setShowImportDialog(false)
+      router.push(`/editor/${(json as { project: { id: string } }).project.id}`)
+    } catch {
+      setImportError("Network error. Please try again.")
+      setIsImporting(false)
     }
   }
 
@@ -363,19 +419,40 @@ export default function ProjectList({
           </div>
 
           {projects.length > 0 && (
-            <Button
-              onClick={openNewDialog}
-              className="bg-[#C9A84C] hover:bg-[#e0b85a] text-[#0D1B2A] font-semibold"
-            >
-              <Plus className="w-4 h-4 mr-1.5" />
-              New Project
-            </Button>
+            <div className="flex items-center gap-2">
+              <Button
+                variant="outline"
+                onClick={() => {
+                  setImportFile(null)
+                  setImportError(null)
+                  setShowImportDialog(true)
+                }}
+                className="border-[#1e3a52] bg-transparent text-slate-300 hover:bg-white/5 hover:text-white"
+              >
+                <Upload className="w-4 h-4 mr-1.5" />
+                Import PDF
+              </Button>
+              <Button
+                onClick={openNewDialog}
+                className="bg-[#C9A84C] hover:bg-[#e0b85a] text-[#0D1B2A] font-semibold"
+              >
+                <Plus className="w-4 h-4 mr-1.5" />
+                New Project
+              </Button>
+            </div>
           )}
         </div>
 
         {/* Content */}
         {projects.length === 0 ? (
-          <EmptyState onNew={openNewDialog} />
+          <EmptyState
+            onNew={openNewDialog}
+            onImport={() => {
+              setImportFile(null)
+              setImportError(null)
+              setShowImportDialog(true)
+            }}
+          />
         ) : (
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
             {projects.map((project) => (
@@ -481,6 +558,75 @@ export default function ProjectList({
                 <Loader2 className="w-4 h-4 animate-spin" />
               ) : (
                 "Create project"
+              )}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* ─── Import PDF dialog ─────────────────────────────────────────────── */}
+      <Dialog
+        open={showImportDialog}
+        onOpenChange={(open) => {
+          if (!isImporting) setShowImportDialog(open)
+        }}
+      >
+        <DialogContent className="bg-[#0a1929] border-[#1e3a52] text-white sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle className="text-white">Import PDF</DialogTitle>
+            <DialogDescription className="text-slate-400">
+              Upload a finished PDF ebook. Layout correction tools will open from the imported project.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-4 py-2">
+            <div className="rounded-lg border border-dashed border-[#1e3a52] bg-[#0D1B2A] p-4">
+              <Label htmlFor="pdf-import" className="mb-2 block text-sm text-slate-300">
+                PDF file
+              </Label>
+              <Input
+                id="pdf-import"
+                type="file"
+                accept="application/pdf,.pdf"
+                disabled={isImporting}
+                onChange={(e) => {
+                  setImportError(null)
+                  setImportFile(e.target.files?.[0] ?? null)
+                }}
+                className="bg-[#0a1929] border-[#1e3a52] text-slate-300 file:text-slate-200"
+              />
+              {importFile && (
+                <p className="mt-2 text-xs text-slate-500 truncate">
+                  {importFile.name}
+                </p>
+              )}
+            </div>
+
+            {importError && (
+              <p className="text-sm text-red-400 rounded-md border border-red-500/20 bg-red-500/5 px-3 py-2">
+                {importError}
+              </p>
+            )}
+          </div>
+
+          <DialogFooter className="gap-2">
+            <Button
+              variant="ghost"
+              onClick={() => setShowImportDialog(false)}
+              disabled={isImporting}
+              className="text-slate-400 hover:text-white hover:bg-white/5"
+            >
+              Cancel
+            </Button>
+            <Button
+              onClick={handleImportPdf}
+              disabled={isImporting || !importFile}
+              className="bg-[#C9A84C] hover:bg-[#e0b85a] text-[#0D1B2A] font-semibold min-w-[110px]"
+            >
+              {isImporting ? (
+                <Loader2 className="w-4 h-4 animate-spin" />
+              ) : (
+                "Import PDF"
               )}
             </Button>
           </DialogFooter>

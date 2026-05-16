@@ -46,8 +46,60 @@ export interface Project {
 
 // ─── Project as stored in the `content` JSONB column ─────────────────────────
 
+export type ProjectType = "ebook" | "imported_pdf"
+
+export interface ImportedPdfPageSize {
+  width: number
+  height: number
+  unit: "pt"
+}
+
+export interface ImportedPdfInfo {
+  status: "imported"
+  originalFilename: string
+  storageBucket: string
+  storagePath: string
+  pageCount: number | null
+  pageSize: ImportedPdfPageSize | null
+  importedAt: string
+}
+
+export type PdfLayoutBlockType = "visual_region" | "text_overlay"
+
+export interface PdfLayoutBlock {
+  id: string
+  pageIndex: number
+  x: number
+  y: number
+  width: number
+  height: number
+  sourcePageIndex?: number
+  sourceX?: number
+  sourceY?: number
+  sourceWidth?: number
+  sourceHeight?: number
+  type: PdfLayoutBlockType
+  label?: string
+  locked?: boolean
+  // Future text editing can attach extracted text, replacement text,
+  // font metadata, and overlay rendering instructions here.
+  textOverlay?: Record<string, unknown>
+}
+
+export interface PdfLayoutEditState {
+  version: 1
+  deletedPageIds?: string[]
+  deletedPages: number[]
+  pageOrder: string[]
+  visualBlocks: PdfLayoutBlock[]
+  textOverlays: Record<string, unknown>
+}
+
 export interface ProjectContent {
+  projectType?: ProjectType
   chapters: Chapter[]
+  importedPdf?: ImportedPdfInfo
+  layoutEditState?: PdfLayoutEditState
 }
 
 // ─── Database row shape (mirrors 001_initial.sql exactly) ────────────────────

@@ -3,6 +3,8 @@ import { notFound } from "next/navigation"
 import type { Metadata } from "next"
 import { createClient } from "@/lib/supabase/server"
 import EditorShell from "./EditorShell"
+import ImportedPdfShell from "./ImportedPdfShell"
+import type { ImportedPdfInfo, ProjectContent } from "@/lib/project-schema"
 
 // Always fetch the latest project from Supabase — never serve a cached snapshot.
 // Without this, Next.js App Router's prefetch cache can return stale content
@@ -27,6 +29,30 @@ const fetchProject = cache(async (id: string) => {
   return data
 })
 
+function getImportedPdf(content: unknown): ImportedPdfInfo | null {
+  if (
+    typeof content !== "object" ||
+    content === null ||
+    !("projectType" in content) ||
+    (content as { projectType?: unknown }).projectType !== "imported_pdf" ||
+    !("importedPdf" in content)
+  ) {
+    return null
+  }
+
+  const importedPdf = (content as { importedPdf?: unknown }).importedPdf
+  if (
+    typeof importedPdf !== "object" ||
+    importedPdf === null ||
+    !("originalFilename" in importedPdf) ||
+    typeof (importedPdf as { originalFilename?: unknown }).originalFilename !== "string"
+  ) {
+    return null
+  }
+
+  return importedPdf as ImportedPdfInfo
+}
+
 export async function generateMetadata({ params }: Props): Promise<Metadata> {
   const project = await fetchProject(params.id)
   return {
@@ -39,6 +65,18 @@ export default async function EditorPage({ params }: Props) {
 
   // RLS means a missing row is either genuinely missing or owned by someone else.
   if (!project) notFound()
+
+  const importedPdf = getImportedPdf(project.content)
+  if (importedPdf) {
+    return (
+      <ImportedPdfShell
+        projectId={project.id}
+        title={project.title}
+        content={project.content as unknown as ProjectContent}
+        importedPdf={importedPdf}
+      />
+    )
+  }
 
   return <EditorShell project={project} />
 }

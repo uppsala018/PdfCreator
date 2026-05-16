@@ -11,7 +11,7 @@ export default async function DashboardPage() {
 
   const { data, error } = await supabase
     .from("projects")
-    .select("id, title, author, theme, template, updated_at")
+    .select("id, title, author, theme, template, content, updated_at")
     .order("updated_at", { ascending: false })
 
   if (error) {

@@ -17,7 +17,7 @@ export async function GET() {
 
   const { data, error } = await supabase
     .from("projects")
-    .select("id, title, author, theme, template, updated_at")
+    .select("id, title, author, theme, template, content, updated_at")
     .order("updated_at", { ascending: false })
 
   if (error) {
@@ -75,7 +75,7 @@ export async function POST(request: NextRequest) {
           : null,
       theme: resolvedTheme,
       template: "ebook-prompt-collection",
-      content: { chapters: [] },
+      content: { projectType: "ebook", chapters: [] },
     })
     .select("id, title, author, theme, template, updated_at")
     .single()
