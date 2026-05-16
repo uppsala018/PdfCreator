@@ -39,6 +39,26 @@ export type ProjectSummary = {
   updated_at: string
 }
 
+type ImportPdfError = {
+  error?: string
+  code?: string
+  detail?: string
+}
+
+function formatImportError(value: unknown): string {
+  const json = value as ImportPdfError
+  if (!json || typeof json !== "object") return "Failed to import PDF."
+
+  const base = typeof json.error === "string" ? json.error : "Failed to import PDF."
+  const code = typeof json.code === "string" ? json.code : null
+  const detail = typeof json.detail === "string" ? json.detail : null
+
+  return [
+    code ? `[${code}] ${base}` : base,
+    detail ? `Details: ${detail}` : null,
+  ].filter(Boolean).join(" ")
+}
+
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
 const THEME_LABEL: Record<string, string> = {
@@ -352,7 +372,7 @@ export default function ProjectList({
       const json = await res.json().catch(() => ({}))
 
       if (!res.ok) {
-        setImportError((json as { error?: string }).error ?? "Failed to import PDF.")
+        setImportError(formatImportError(json))
         setIsImporting(false)
         return
       }
