@@ -16,17 +16,6 @@ function missingConfig(): string[] {
   ].filter((key) => !process.env[key])
 }
 
-function isBucketAlreadyExists(error: { message?: string; statusCode?: string } | null) {
-  if (!error) return false
-  const message = error.message?.toLowerCase() ?? ""
-  return (
-    error.statusCode === "409" ||
-    message.includes("already exists") ||
-    message.includes("duplicate") ||
-    message.includes("resource already exists")
-  )
-}
-
 export async function POST(request: NextRequest) {
   const missing = missingConfig()
   if (missing.length > 0) {
@@ -83,15 +72,13 @@ export async function POST(request: NextRequest) {
   }
 
   const service = createServiceClient()
-  const { error: bucketError } = await service.storage.createBucket(IMPORT_BUCKET, {
-    public: false,
-  })
-  if (bucketError && !isBucketAlreadyExists(bucketError)) {
-    console.error("[import-pdf:upload-url] BUCKET_FAILURE", bucketError)
+  const { error: bucketError } = await service.storage.getBucket(IMPORT_BUCKET)
+  if (bucketError) {
+    console.error("[import-pdf:upload-url] BUCKET_FAILURE getBucket(imports)", bucketError)
     return NextResponse.json(
       {
         code: "BUCKET_FAILURE",
-        error: "Storage bucket failure: could not create or verify the private imports bucket.",
+        error: "Supabase Storage bucket `imports` is missing or inaccessible. Create it manually as a private bucket and verify Storage policies.",
         detail: bucketError.message,
       },
       { status: 500 }
@@ -104,7 +91,7 @@ export async function POST(request: NextRequest) {
     .createSignedUploadUrl(storagePath)
 
   if (error || !data) {
-    console.error("[import-pdf:upload-url] SIGNED_UPLOAD_FAILURE", error)
+    console.error("[import-pdf:upload-url] SIGNED_UPLOAD_FAILURE createSignedUploadUrl(imports)", error)
     return NextResponse.json(
       {
         code: "UPLOAD_FAILURE",
