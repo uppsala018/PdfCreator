@@ -47,6 +47,7 @@ export async function generateLiveStructuredChapters(
       model: input.model,
       temperature: 0.2,
       maxOutputTokens: 2600,
+      metadata: { timeoutMs: 35_000 },
       messages: [
         {
           role: "system",

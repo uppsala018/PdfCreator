@@ -51,6 +51,7 @@ export async function generateLiveStructuredOutline(
       model: input.model,
       temperature: 0.2,
       maxOutputTokens: 900,
+      metadata: { timeoutMs: 22_000 },
       messages: [
         {
           role: "system",

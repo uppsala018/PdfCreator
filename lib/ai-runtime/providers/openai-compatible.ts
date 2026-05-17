@@ -104,8 +104,8 @@ export class OpenAICompatibleProvider implements AIProviderAdapter {
     }
 
     const fallbackModels =
-      this.config.kind === "openrouter"
-        ? uniqueModels([...(this.config.fallbackModels ?? []), this.config.fallbackModel]).slice(0, 2)
+      this.config.kind === "openrouter" || this.config.kind === "gemini"
+        ? uniqueModels([...(this.config.fallbackModels ?? []), this.config.fallbackModel])
         : []
     if (!text && fallbackModels.length > 0) {
       for (const fallbackModel of fallbackModels) {
@@ -202,7 +202,10 @@ export class OpenAICompatibleProvider implements AIProviderAdapter {
 
     const key = resolveProviderApiKey(this.config)
     const controller = new AbortController()
-    const timeout = setTimeout(() => controller.abort(), 60_000)
+    const timeoutMs = typeof request.metadata?.timeoutMs === "number"
+      ? Math.max(5_000, Math.min(60_000, request.metadata.timeoutMs))
+      : 60_000
+    const timeout = setTimeout(() => controller.abort(), timeoutMs)
 
     try {
       const response = await fetch(`${this.config.baseUrl?.replace(/\/$/, "")}/chat/completions`, {

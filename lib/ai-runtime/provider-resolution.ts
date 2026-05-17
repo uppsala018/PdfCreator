@@ -72,7 +72,7 @@ const DEFAULT_MODELS: Record<Exclude<BuiltInAIProviderId, "custom" | "mock">, st
   openai: "gpt-4o-mini",
   anthropic: "claude-haiku-4-5-20251001",
   openrouter: "nvidia/nemotron-3-super-120b-a12b:free",
-  gemini: "gemini-2.0-flash",
+  gemini: "gemini-3.1-flash-lite",
   mistral: "mistral-small-latest",
 }
 
@@ -82,6 +82,12 @@ const OPENROUTER_FALLBACK_MODELS = [
   "minimax/minimax-m2.5:free",
   "openrouter/free",
   "openai/gpt-4o-mini",
+]
+
+const GEMINI_FALLBACK_MODELS = [
+  "gemini-3.1-flash-lite",
+  "gemini-3-flash-preview",
+  "gemini-3.1-pro-preview",
 ]
 
 const ENV_PROVIDER_ORDER: BuiltInAIProviderId[] = [
@@ -187,7 +193,8 @@ export function buildProviders(
         baseUrl: "https://generativelanguage.googleapis.com/v1beta/openai",
         apiKey: clean(userSettings?.gemini_key),
         apiKeyEnvVar: "GEMINI_API_KEY",
-        defaultModel: firstValue(userSettings?.gemini_model, secrets.get("GEMINI_MODEL"), DEFAULT_MODELS.gemini),
+        defaultModel: firstModelValue(userSettings?.gemini_model, secrets.get("GEMINI_MODEL"), DEFAULT_MODELS.gemini),
+        fallbackModels: modelList(userSettings?.gemini_model, secrets.get("GEMINI_MODEL"), GEMINI_FALLBACK_MODELS),
       })
     ),
     new OpenAICompatibleProvider(
@@ -281,6 +288,21 @@ function firstValue(...values: Array<string | null | undefined>) {
   return ""
 }
 
+function firstModelValue(...values: Array<string | null | undefined>) {
+  for (const value of values) {
+    const first = modelList(value)[0]
+    if (first) return first
+  }
+  return ""
+}
+
+function modelList(...values: Array<string | null | undefined | string[]>) {
+  return Array.from(new Set(values.flatMap((value) => {
+    if (Array.isArray(value)) return value
+    return (value ?? "").split(",")
+  }).map((value) => value.trim()).filter(Boolean)))
+}
+
 function normalizeProviderId(value: string | null | undefined): BuiltInAIProviderId | null {
   const id = value?.trim().toLowerCase()
   if (
@@ -319,7 +341,7 @@ function modelForProvider(
     case "openrouter":
       return firstValue(userSettings?.openrouter_model, secrets.get("OPENROUTER_MODEL"), DEFAULT_MODELS.openrouter)
     case "gemini":
-      return firstValue(userSettings?.gemini_model, secrets.get("GEMINI_MODEL"), DEFAULT_MODELS.gemini)
+      return firstModelValue(userSettings?.gemini_model, secrets.get("GEMINI_MODEL"), DEFAULT_MODELS.gemini)
     case "mistral":
       return firstValue(userSettings?.mistral_model, secrets.get("MISTRAL_MODEL"), DEFAULT_MODELS.mistral)
     case "custom":

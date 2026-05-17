@@ -5,6 +5,7 @@ import type { AiEbookFormat, AiStructureIssue } from "@/lib/ai-ebook/ebook-gener
 import { generateLiveStructuredChapters } from "@/lib/ai-ebook/live-chapter-generation"
 import { generateLiveStructuredOutline } from "@/lib/ai-ebook/live-outline-generation"
 import { runControlledRegenerationLoop } from "@/lib/ai-ebook/regeneration-loop"
+import type { AIProviderAdapter } from "@/lib/ai-runtime/provider-interface"
 import { resolveAIProvider } from "@/lib/ai-runtime/provider-resolution"
 import {
   normalizeUserAISettings,
@@ -64,12 +65,87 @@ export async function POST(request: NextRequest) {
     .eq("user_id", user.id)
     .maybeSingle()
 
+  const userSettings = normalizeUserAISettings(settings)
   const resolvedProvider = resolveAIProvider({
-    userSettings: normalizeUserAISettings(settings),
+    userSettings,
     preferredProviderId: input.providerId,
     model: input.model,
   })
+  const geminiFallback = resolvedProvider.status.activeProvider === "gemini"
+    ? null
+    : resolveAIProvider({
+        userSettings,
+        preferredProviderId: "gemini",
+      })
 
+  let generation = await generateCompleteEbook({
+    input,
+    sourceDocument,
+    provider: resolvedProvider.provider,
+    providerStatus: resolvedProvider.status,
+    model: input.model,
+  })
+
+  if (shouldRetryWithGemini(generation.diagnostics) && geminiFallback?.status.activeProvider === "gemini") {
+    generation = await generateCompleteEbook({
+      input,
+      sourceDocument,
+      provider: geminiFallback.provider,
+      providerStatus: geminiFallback.status,
+    })
+  }
+
+  return NextResponse.json({
+    draft: generation.draft,
+    structuredEbook: generation.regeneration.ebook,
+    diagnostics: generation.diagnostics,
+    summary: {
+      title: generation.draft.title,
+      subtitle: generation.draft.subtitle,
+      chapterCount: generation.draft.chapters.length,
+      blockCount: generation.draft.chapters.reduce((sum, chapter) => sum + chapter.blocks.length, 0),
+      diagnosticsCount: generation.diagnostics.length,
+      regenerationPasses: generation.regeneration.metadata.passesRun,
+      provider: {
+        ...generation.chapters.provider,
+        keySource: generation.providerStatus.keySource,
+        activeProvider: generation.providerStatus.activeProvider,
+        activeProviderName: generation.providerStatus.activeProviderName,
+      },
+      source: sourceDocument
+        ? {
+            inputKind: sourceDocument.metadata.inputKind,
+            wordCount: sourceDocument.metadata.wordCount,
+            sectionCount: sourceDocument.sections.length,
+          }
+        : null,
+    },
+    regeneration: {
+      metadata: generation.regeneration.metadata,
+      passHistory: generation.regeneration.passHistory.map((pass) => ({
+        pass: pass.pass,
+        improved: pass.improved,
+        changes: pass.changes,
+        beforeCount: pass.beforeDiagnostics.length,
+        afterCount: pass.afterDiagnostics.length,
+      })),
+    },
+  })
+}
+
+async function generateCompleteEbook({
+  input,
+  sourceDocument,
+  provider,
+  providerStatus,
+  model,
+}: {
+  input: ReturnType<typeof normalizeRequest>
+  sourceDocument: ReturnType<typeof normalizeSource> | undefined
+  provider: AIProviderAdapter
+  providerStatus: ReturnType<typeof resolveAIProvider>["status"]
+  model?: string
+}) {
   const outline = await generateLiveStructuredOutline({
     topic: input.topic || sourceDocument?.metadata.title,
     sourceDocument,
@@ -80,16 +156,16 @@ export async function POST(request: NextRequest) {
     outcome: input.ctaGoal,
     brand: input.brand,
     theme: input.theme,
-    provider: resolvedProvider.provider,
-    model: input.model,
+    provider,
+    model,
   })
 
   const chapters = await generateLiveStructuredChapters({
     outline: outline.outline,
     audience: input.audience,
     tone: input.tone,
-    provider: resolvedProvider.provider,
-    model: input.model,
+    provider,
+    model,
   })
 
   const regeneration = runControlledRegenerationLoop(chapters.composerReady, {
@@ -103,42 +179,22 @@ export async function POST(request: NextRequest) {
     ...regeneration.finalDiagnostics,
   ]
 
-  return NextResponse.json({
+  return {
     draft,
-    structuredEbook: regeneration.ebook,
+    regeneration,
+    chapters,
     diagnostics,
-    summary: {
-      title: draft.title,
-      subtitle: draft.subtitle,
-      chapterCount: draft.chapters.length,
-      blockCount: draft.chapters.reduce((sum, chapter) => sum + chapter.blocks.length, 0),
-      diagnosticsCount: diagnostics.length,
-      regenerationPasses: regeneration.metadata.passesRun,
-      provider: {
-        ...chapters.provider,
-        keySource: resolvedProvider.status.keySource,
-        activeProvider: resolvedProvider.status.activeProvider,
-        activeProviderName: resolvedProvider.status.activeProviderName,
-      },
-      source: sourceDocument
-        ? {
-            inputKind: sourceDocument.metadata.inputKind,
-            wordCount: sourceDocument.metadata.wordCount,
-            sectionCount: sourceDocument.sections.length,
-          }
-        : null,
-    },
-    regeneration: {
-      metadata: regeneration.metadata,
-      passHistory: regeneration.passHistory.map((pass) => ({
-        pass: pass.pass,
-        improved: pass.improved,
-        changes: pass.changes,
-        beforeCount: pass.beforeDiagnostics.length,
-        afterCount: pass.afterDiagnostics.length,
-      })),
-    },
-  })
+    providerStatus,
+  }
+}
+
+function shouldRetryWithGemini(diagnostics: AiStructureIssue[]) {
+  return diagnostics.some((diagnostic) =>
+    diagnostic.code === "OUTLINE_FALLBACK_USED" ||
+    diagnostic.code === "CHAPTER_FALLBACK_USED" ||
+    diagnostic.code === "MALFORMED_OUTLINE_JSON" ||
+    diagnostic.code === "MALFORMED_CHAPTER_JSON"
+  )
 }
 
 function normalizeRequest(body: unknown) {
