@@ -2,6 +2,7 @@ import { type NextRequest, NextResponse } from "next/server"
 import { PDFDocument, rgb } from "pdf-lib"
 import { createClient, createServiceClient } from "@/lib/supabase/server"
 import type { ImportedPdfInfo, PdfLayoutBlock, PdfLayoutEditState } from "@/lib/project-schema"
+import { normalizeImportedPdfLayout } from "@/lib/imported-pdf-layout"
 
 interface RouteContext {
   params: { id: string }
@@ -10,7 +11,7 @@ interface RouteContext {
 interface ImportedPdfContent {
   projectType?: unknown
   importedPdf?: unknown
-  layoutEditState?: Partial<PdfLayoutEditState>
+  layoutEditState?: unknown
 }
 
 function getImportedPdf(content: unknown): ImportedPdfInfo | null {
@@ -40,15 +41,7 @@ function getLayout(content: unknown): PdfLayoutEditState {
     typeof content === "object" && content !== null
       ? (content as ImportedPdfContent).layoutEditState
       : undefined
-
-  return {
-    version: 1,
-    deletedPages: raw?.deletedPages ?? [],
-    pageOrder: raw?.pageOrder ?? [],
-    visualBlocks: raw?.visualBlocks ?? [],
-    textOverlays: raw?.textOverlays ?? {},
-    patchFills: raw?.patchFills ?? {},
-  }
+  return normalizeImportedPdfLayout(raw)
 }
 
 function safeFilename(name: string) {

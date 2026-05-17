@@ -2,6 +2,7 @@ import { type NextRequest, NextResponse } from "next/server"
 import { createClient, createServiceClient } from "@/lib/supabase/server"
 import type { Json } from "@/lib/supabase/database.types"
 import type { ImportedPdfPageSize, ProjectContent } from "@/lib/project-schema"
+import { createDefaultImportedPdfLayout } from "@/lib/imported-pdf-layout"
 
 const IMPORT_BUCKET = "imports"
 const MAX_PDF_BYTES = 50 * 1024 * 1024
@@ -182,14 +183,7 @@ export async function POST(request: NextRequest) {
         pageSize,
         importedAt: new Date().toISOString(),
       },
-      layoutEditState: {
-        version: 1,
-        deletedPages: [],
-        pageOrder: [],
-        visualBlocks: [],
-        textOverlays: {},
-        patchFills: {},
-      },
+      layoutEditState: createDefaultImportedPdfLayout(),
     }
 
     const { data: project, error: insertError } = await supabase

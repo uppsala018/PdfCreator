@@ -35,6 +35,7 @@ import type {
   PdfRepairAnalysis,
   ProjectContent,
 } from "@/lib/project-schema"
+import { normalizeImportedPdfLayout } from "@/lib/imported-pdf-layout"
 import { cn } from "@/lib/utils"
 
 type PdfDocument = {
@@ -86,15 +87,6 @@ type RepairSuggestionWithLocalStatus = RepairSuggestion & {
   localStatus: LocalSuggestionStatus
 }
 
-const EMPTY_LAYOUT: PdfLayoutEditState = {
-  version: 1,
-  deletedPages: [],
-  pageOrder: [],
-  visualBlocks: [],
-  textOverlays: {},
-  patchFills: {},
-}
-
 const ANALYSIS_STEPS: AnalysisStep[] = [
   "scanning_pages",
   "analyzing_layout",
@@ -104,14 +96,7 @@ const ANALYSIS_STEPS: AnalysisStep[] = [
 ]
 
 function normalizeLayout(value: ProjectContent["layoutEditState"]): PdfLayoutEditState {
-  return {
-    ...EMPTY_LAYOUT,
-    ...(value ?? {}),
-    deletedPages: value?.deletedPages ?? [],
-    visualBlocks: value?.visualBlocks ?? [],
-    textOverlays: value?.textOverlays ?? {},
-    patchFills: value?.patchFills ?? {},
-  }
+  return normalizeImportedPdfLayout(value)
 }
 
 function clamp(value: number, min: number, max: number) {
