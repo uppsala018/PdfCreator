@@ -43,6 +43,8 @@ export function publicProviderConfig(config: AIProviderConfig) {
     displayName: config.displayName,
     baseUrl: config.baseUrl,
     defaultModel: config.defaultModel,
+    fallbackModel: config.fallbackModel,
+    fallbackModels: config.fallbackModels,
     fallbackProviderId: config.fallbackProviderId,
     models: config.models ?? [],
     capabilities: config.capabilities,

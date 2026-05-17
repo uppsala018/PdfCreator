@@ -114,6 +114,96 @@ describe("AI provider runtime", () => {
     })
   })
 
+  it("reads OpenAI-compatible array message content", async () => {
+    const originalFetch = global.fetch
+    global.fetch = async () =>
+      new Response(
+        JSON.stringify({
+          choices: [
+            {
+              message: {
+                content: [{ type: "text", text: "array content" }],
+              },
+            },
+          ],
+        }),
+        { status: 200 }
+      )
+
+    try {
+      const provider = new OpenAICompatibleProvider(
+        createOpenAICompatibleConfig({
+          id: "array-compatible",
+          displayName: "Array Compatible",
+          baseUrl: "https://example.com/v1",
+          defaultModel: "array-model",
+          apiKey: "test-key",
+        })
+      )
+
+      await expect(
+        provider.generateText({ messages: [{ role: "user", content: "test" }] })
+      ).resolves.toMatchObject({
+        text: "array content",
+      })
+    } finally {
+      global.fetch = originalFetch
+    }
+  })
+
+  it("falls back to a stable OpenRouter model when the selected model returns empty content", async () => {
+    const originalFetch = global.fetch
+    const requestedModels: string[] = []
+    global.fetch = async (_input, init) => {
+      const body = JSON.parse(String(init?.body ?? "{}")) as { model?: string }
+      requestedModels.push(body.model ?? "")
+      if (requestedModels.length === 1) {
+        return new Response(
+          JSON.stringify({
+            choices: [{ finish_reason: "length", message: { content: null } }],
+          }),
+          { status: 200 }
+        )
+      }
+      return new Response(
+        JSON.stringify({
+          choices: [{ finish_reason: "stop", message: { content: "{\"ok\":true}" } }],
+        }),
+        { status: 200 }
+      )
+    }
+
+    try {
+      const provider = new OpenAICompatibleProvider(
+        createOpenAICompatibleConfig({
+          id: "openrouter",
+          kind: "openrouter",
+          displayName: "OpenRouter",
+          baseUrl: "https://openrouter.ai/api/v1",
+          defaultModel: "tencent/hy3-preview",
+          fallbackModels: ["openai/gpt-4o-mini"],
+          apiKey: "test-key",
+        })
+      )
+
+      const result = await provider.generateStructuredJson<{ ok: true }>({
+        messages: [{ role: "user", content: "Return JSON" }],
+        json: {
+          schemaName: "Ok",
+          validate(value): value is { ok: true } {
+            return typeof value === "object" && value !== null && (value as { ok?: unknown }).ok === true
+          },
+        },
+      })
+
+      expect(result.model).toBe("openai/gpt-4o-mini")
+      expect(result.json).toEqual({ ok: true })
+      expect(requestedModels).toEqual(["tencent/hy3-preview", "openai/gpt-4o-mini"])
+    } finally {
+      global.fetch = originalFetch
+    }
+  })
+
   it("resolves env configured providers before mock", () => {
     const resolved = resolveAIProvider({
       secrets: secrets({

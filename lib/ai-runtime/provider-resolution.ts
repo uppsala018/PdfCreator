@@ -167,6 +167,8 @@ export function buildProviders(
         apiKey: clean(userSettings?.openrouter_key),
         apiKeyEnvVar: "OPENROUTER_API_KEY",
         defaultModel: firstValue(userSettings?.openrouter_model, secrets.get("OPENROUTER_MODEL"), DEFAULT_MODELS.openrouter),
+        fallbackModel: firstValue(secrets.get("OPENROUTER_FALLBACK_MODEL")),
+        fallbackModels: ["openai/gpt-4o-mini"],
       })
     ),
     new OpenAICompatibleProvider(

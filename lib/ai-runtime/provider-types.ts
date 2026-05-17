@@ -43,6 +43,8 @@ export interface AIProviderConfig {
   apiKeyEnvVar?: string
   keySource?: "user" | "env" | "mock"
   defaultModel?: string
+  fallbackModel?: string
+  fallbackModels?: string[]
   compatibilityMode?: AICompatibilityMode
   fallbackProviderId?: string
   models?: AIModelConfig[]

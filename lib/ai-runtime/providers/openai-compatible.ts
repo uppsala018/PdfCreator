@@ -22,6 +22,8 @@ export interface OpenAICompatibleProviderOptions {
   apiKeyEnvVar?: string
   apiKey?: string
   defaultModel: string
+  fallbackModel?: string
+  fallbackModels?: string[]
   kind?: AIProviderConfig["kind"]
   headers?: Record<string, string>
 }
@@ -37,6 +39,8 @@ export function createOpenAICompatibleConfig(
     apiKey: options.apiKey,
     apiKeyEnvVar: options.apiKeyEnvVar,
     defaultModel: options.defaultModel,
+    fallbackModel: options.fallbackModel,
+    fallbackModels: options.fallbackModels,
     compatibilityMode: "openai-compatible",
     headers: options.headers,
     capabilities: {
@@ -53,6 +57,13 @@ export function createOpenAICompatibleConfig(
         label: options.defaultModel,
         supportsStructuredJson: true,
       },
+      ...uniqueModels([options.fallbackModel, ...(options.fallbackModels ?? [])])
+        .filter((model) => model !== options.defaultModel)
+        .map((model) => ({
+          id: model,
+          label: model,
+          supportsStructuredJson: true,
+        })),
     ],
   }
 }
@@ -80,9 +91,42 @@ export class OpenAICompatibleProvider implements AIProviderAdapter {
   }
 
   async generateText(request: AIRequest): Promise<AIResponse> {
-    const json = await this.createChatCompletion(request)
-    const text = extractOpenAIText(json)
+    let text: string | null = null
+    let raw: unknown = null
+    let model = request.model ?? this.config.defaultModel ?? "unknown"
+    let lastError: unknown = null
+
+    try {
+      raw = await this.createChatCompletion(request)
+      text = extractOpenAIText(raw)
+    } catch (error) {
+      lastError = error
+    }
+
+    const fallbackModels =
+      this.config.kind === "openrouter"
+        ? uniqueModels([this.config.fallbackModel, ...(this.config.fallbackModels ?? [])])
+        : []
+    if (!text && fallbackModels.length > 0) {
+      for (const fallbackModel of fallbackModels) {
+        if (!fallbackModel || fallbackModel === model) continue
+        try {
+          const fallbackJson = await this.createChatCompletion(request, fallbackModel)
+          const fallbackText = extractOpenAIText(fallbackJson)
+          if (fallbackText) {
+            text = fallbackText
+            raw = fallbackJson
+            model = fallbackModel
+            break
+          }
+        } catch (error) {
+          lastError = error
+        }
+      }
+    }
+
     if (!text) {
+      if (lastError) throw normalizeProviderError(lastError, this.config.id)
       throw new AIProviderError("INVALID_JSON", "Provider response did not include message content.", {
         providerId: this.config.id,
       })
@@ -90,10 +134,10 @@ export class OpenAICompatibleProvider implements AIProviderAdapter {
 
     return {
       providerId: this.config.id,
-      model: request.model ?? this.config.defaultModel ?? "unknown",
+      model,
       text: text.trim(),
-      raw: json,
-      usage: normalizeUsage(json),
+      raw,
+      usage: normalizeUsage(raw),
     }
   }
 
@@ -148,7 +192,7 @@ export class OpenAICompatibleProvider implements AIProviderAdapter {
     return normalizeProviderError(error, this.config.id)
   }
 
-  private async createChatCompletion(request: AIRequest): Promise<unknown> {
+  private async createChatCompletion(request: AIRequest, modelOverride?: string): Promise<unknown> {
     const validation = await this.validateConnection()
     if (!validation.ok) {
       throw new AIProviderError("CONFIGURATION_ERROR", validation.message ?? "Invalid provider config.", {
@@ -170,10 +214,21 @@ export class OpenAICompatibleProvider implements AIProviderAdapter {
           ...(this.config.headers ?? {}),
         },
         body: JSON.stringify({
-          model: request.model ?? this.config.defaultModel,
+          model: modelOverride ?? request.model ?? this.config.defaultModel,
           messages: request.messages,
           temperature: request.temperature ?? 0.7,
           max_tokens: request.maxOutputTokens ?? 2048,
+          ...(this.config.kind === "openrouter"
+            ? {
+                include_reasoning: false,
+                reasoning: { exclude: true },
+              }
+            : {}),
+          ...(isStructuredJsonRequest(request) && this.config.kind !== "openrouter"
+            ? {
+                response_format: { type: "json_object" },
+              }
+            : {}),
         }),
       })
 
@@ -215,10 +270,34 @@ export class OpenAICompatibleProvider implements AIProviderAdapter {
   }
 }
 
+function uniqueModels(models: Array<string | undefined>) {
+  return Array.from(new Set(models.filter((model): model is string => Boolean(model))))
+}
+
+function isStructuredJsonRequest(request: AIRequest): request is AIStructuredRequest<unknown> {
+  return "json" in request
+}
+
 function extractOpenAIText(value: unknown): string | null {
-  const choices = (value as { choices?: Array<{ message?: { content?: unknown } }> })?.choices
-  const content = choices?.[0]?.message?.content
-  return typeof content === "string" ? content : null
+  const choices = (value as { choices?: Array<{ text?: unknown; message?: { content?: unknown } }> })?.choices
+  const choice = choices?.[0]
+  const content = choice?.message?.content
+  if (typeof content === "string") return content
+  if (Array.isArray(content)) {
+    const text = content
+      .map((part) => {
+        if (typeof part === "string") return part
+        if (typeof part !== "object" || part === null) return ""
+        const item = part as { text?: unknown; content?: unknown }
+        if (typeof item.text === "string") return item.text
+        if (typeof item.content === "string") return item.content
+        return ""
+      })
+      .join("")
+      .trim()
+    return text || null
+  }
+  return typeof choice?.text === "string" ? choice.text : null
 }
 
 function normalizeUsage(value: unknown) {
