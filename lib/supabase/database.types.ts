@@ -103,63 +103,93 @@ export interface Database {
           id: string
           user_id: string
           ai_provider: string | null
+          ai_default_provider: string | null
+          ai_default_model: string | null
           anthropic_key: string | null
           anthropic_model: string | null
+          anthropic_models: string | null
           openai_key: string | null
           openai_model: string | null
+          openai_models: string | null
           openrouter_key: string | null
           openrouter_model: string | null
+          openrouter_models: string | null
           gemini_key: string | null
           gemini_model: string | null
+          gemini_models: string | null
           mistral_key: string | null
           mistral_model: string | null
+          mistral_models: string | null
           custom_provider_name: string | null
           custom_api_key: string | null
           custom_base_url: string | null
           custom_model: string | null
           custom_compatibility: string | null
+          custom_ai_key: string | null
+          custom_ai_base_url: string | null
+          custom_ai_model: string | null
           updated_at: string
         }
         Insert: {
           id?: string
           user_id: string
           ai_provider?: string | null
+          ai_default_provider?: string | null
+          ai_default_model?: string | null
           anthropic_key?: string | null
           anthropic_model?: string | null
+          anthropic_models?: string | null
           openai_key?: string | null
           openai_model?: string | null
+          openai_models?: string | null
           openrouter_key?: string | null
           openrouter_model?: string | null
+          openrouter_models?: string | null
           gemini_key?: string | null
           gemini_model?: string | null
+          gemini_models?: string | null
           mistral_key?: string | null
           mistral_model?: string | null
+          mistral_models?: string | null
           custom_provider_name?: string | null
           custom_api_key?: string | null
           custom_base_url?: string | null
           custom_model?: string | null
           custom_compatibility?: string | null
+          custom_ai_key?: string | null
+          custom_ai_base_url?: string | null
+          custom_ai_model?: string | null
           updated_at?: string
         }
         Update: {
           id?: string
           user_id?: string
           ai_provider?: string | null
+          ai_default_provider?: string | null
+          ai_default_model?: string | null
           anthropic_key?: string | null
           anthropic_model?: string | null
+          anthropic_models?: string | null
           openai_key?: string | null
           openai_model?: string | null
+          openai_models?: string | null
           openrouter_key?: string | null
           openrouter_model?: string | null
+          openrouter_models?: string | null
           gemini_key?: string | null
           gemini_model?: string | null
+          gemini_models?: string | null
           mistral_key?: string | null
           mistral_model?: string | null
+          mistral_models?: string | null
           custom_provider_name?: string | null
           custom_api_key?: string | null
           custom_base_url?: string | null
           custom_model?: string | null
           custom_compatibility?: string | null
+          custom_ai_key?: string | null
+          custom_ai_base_url?: string | null
+          custom_ai_model?: string | null
           updated_at?: string
         }
         Relationships: [

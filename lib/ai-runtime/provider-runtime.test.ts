@@ -156,6 +156,38 @@ describe("AI provider runtime", () => {
     })
   })
 
+  it("does not let stale mock request preference override configured settings", () => {
+    const resolved = resolveAIProvider({
+      preferredProviderId: "mock",
+      userSettings: {
+        ai_provider: "openrouter",
+        openrouter_key: "user-openrouter",
+        openrouter_model: "openai/gpt-4o-mini",
+      },
+      secrets: secrets({}),
+    })
+
+    expect(resolved.status).toMatchObject({
+      activeProvider: "openrouter",
+      activeModel: "openai/gpt-4o-mini",
+      keySource: "user",
+    })
+  })
+
+  it("uses settings provider when request provider is not specified", () => {
+    const resolved = resolveAIProvider({
+      preferredProviderId: "",
+      userSettings: {
+        ai_provider: "openrouter",
+        openrouter_key: "user-openrouter",
+        openrouter_model: "openai/gpt-4o-mini",
+      },
+      secrets: secrets({}),
+    })
+
+    expect(resolved.status.activeProvider).toBe("openrouter")
+  })
+
   it("falls back to mock when no provider is configured", () => {
     const resolved = resolveAIProvider({ secrets: secrets({}) })
 

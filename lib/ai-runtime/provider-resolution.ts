@@ -83,7 +83,7 @@ export function resolveAIProvider(options: {
   const secrets = options.secrets ?? processEnvSecretSource
   const providers = buildProviders(options.userSettings, secrets)
   const registry = createProviderRegistry(providers)
-  const selected = normalizeProviderId(options.preferredProviderId || options.userSettings?.ai_provider)
+  const selected = normalizePreferredProviderId(options.preferredProviderId) ?? normalizeProviderId(options.userSettings?.ai_provider)
   const defaultProvider = normalizeProviderId(secrets.get("AI_PROVIDER") || secrets.get("AI_DEFAULT_PROVIDER"))
   const candidates = uniqueIds([
     selected,
@@ -263,6 +263,11 @@ function normalizeProviderId(value: string | null | undefined): BuiltInAIProvide
     return id
   }
   return null
+}
+
+function normalizePreferredProviderId(value: string | null | undefined): BuiltInAIProviderId | null {
+  const providerId = normalizeProviderId(value)
+  return providerId === "mock" ? null : providerId
 }
 
 function uniqueIds(values: Array<BuiltInAIProviderId | null | undefined>) {

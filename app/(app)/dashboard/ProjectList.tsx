@@ -177,8 +177,8 @@ const EMPTY_COMPLETE_EBOOK_FORM: CompleteEbookForm = {
   targetLength: "standard",
   ctaGoal: "",
   theme: "luxury-black-gold",
-  providerId: "mock",
-  model: "mock-model",
+  providerId: "",
+  model: "",
 }
 
 type AutopilotPhase =
@@ -559,13 +559,20 @@ function CompleteEbookDialog({
                   onChange={(event) => update("providerId", event.target.value)}
                   className="h-9 w-full rounded-md border border-[#1e3a52] bg-[#0D1B2A] px-3 text-sm text-white outline-none"
                 >
-                  <option value="mock">Mock provider</option>
+                  <option value="">Use Settings default</option>
+                  <option value="openrouter">OpenRouter</option>
+                  <option value="openai">OpenAI</option>
+                  <option value="anthropic">Anthropic</option>
+                  <option value="gemini">Google Gemini</option>
+                  <option value="mistral">Mistral</option>
+                  <option value="custom">Other / Custom</option>
                 </select>
               </WizardField>
               <WizardField label="Model">
                 <Input
                   value={form.model}
                   onChange={(event) => update("model", event.target.value)}
+                  placeholder="Use provider default"
                   className="bg-[#0D1B2A] border-[#1e3a52] text-white"
                 />
               </WizardField>
