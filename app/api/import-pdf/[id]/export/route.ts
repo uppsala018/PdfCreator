@@ -47,6 +47,7 @@ function getLayout(content: unknown): PdfLayoutEditState {
     pageOrder: raw?.pageOrder ?? [],
     visualBlocks: raw?.visualBlocks ?? [],
     textOverlays: raw?.textOverlays ?? {},
+    patchFills: raw?.patchFills ?? {},
   }
 }
 

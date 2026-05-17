@@ -86,6 +86,15 @@ export interface PdfLayoutBlock {
   textOverlay?: Record<string, unknown>
 }
 
+export type PdfPatchFillMode = "transparent" | "white" | "sampled_background" | "custom_color"
+
+export interface PdfPatchFill {
+  pageIndex: number
+  regionId?: string
+  mode: PdfPatchFillMode
+  color?: string
+}
+
 export interface PdfLayoutEditState {
   version: 1
   deletedPageIds?: string[]
@@ -93,6 +102,34 @@ export interface PdfLayoutEditState {
   pageOrder: string[]
   visualBlocks: PdfLayoutBlock[]
   textOverlays: Record<string, unknown>
+  patchFills?: Record<string, PdfPatchFill>
+}
+
+export type PdfRepairDiagnosticSeverity = "info" | "warning" | "error"
+
+export interface PdfRepairDiagnostic {
+  id: string
+  code: string
+  severity: PdfRepairDiagnosticSeverity
+  message: string
+  pageIndex?: number
+  regionId?: string
+}
+
+export interface PdfRepairAnalysisSummary {
+  pagesAnalyzed: number
+  issuesFound: number
+  suggestionsGenerated: number
+  warningsCount: number
+  errorsCount: number
+}
+
+export interface PdfRepairAnalysis {
+  version: 1
+  analyzedAt: string
+  diagnostics: PdfRepairDiagnostic[]
+  suggestions: import("@/lib/pdf-repair/suggestions").RepairSuggestion[]
+  summary: PdfRepairAnalysisSummary
 }
 
 export interface ProjectContent {
@@ -100,6 +137,7 @@ export interface ProjectContent {
   chapters: Chapter[]
   importedPdf?: ImportedPdfInfo
   layoutEditState?: PdfLayoutEditState
+  pdfRepairAnalysis?: PdfRepairAnalysis
 }
 
 // ─── Database row shape (mirrors 001_initial.sql exactly) ────────────────────

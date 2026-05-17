@@ -188,6 +188,7 @@ export async function POST(request: NextRequest) {
         pageOrder: [],
         visualBlocks: [],
         textOverlays: {},
+        patchFills: {},
       },
     }
 
