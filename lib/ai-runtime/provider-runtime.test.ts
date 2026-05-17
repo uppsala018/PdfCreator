@@ -145,6 +145,21 @@ describe("AI provider runtime", () => {
     })
   })
 
+  it("maps OpenRouter alias payloads into canonical settings columns", () => {
+    expect(
+      buildUserAISettingsPatch("user-1", {
+        ai_default_provider: "openrouter",
+        openrouter_api_key: "  sk-or-alias-key  ",
+        openrouter_model: "  openai/gpt-4o-mini  ",
+      })
+    ).toEqual({
+      user_id: "user-1",
+      ai_provider: "openrouter",
+      openrouter_key: "sk-or-alias-key",
+      openrouter_model: "openai/gpt-4o-mini",
+    })
+  })
+
   it("loads masked OpenRouter key status without exposing the key", () => {
     const response = publicAISettingsResponse({
       ai_provider: "openrouter",
@@ -196,6 +211,60 @@ describe("AI provider runtime", () => {
       activeProvider: "mistral",
       activeModel: "mistral-large-latest",
       keySource: "user",
+    })
+  })
+
+  it("resolves OpenRouter with a user key before env fallback", () => {
+    const resolved = resolveAIProvider({
+      userSettings: {
+        ai_provider: "openrouter",
+        openrouter_key: "user-openrouter",
+        openrouter_model: "openai/gpt-4o-mini",
+      },
+      secrets: secrets({
+        OPENROUTER_API_KEY: "env-openrouter",
+        OPENROUTER_MODEL: "anthropic/claude-3.5-sonnet",
+      }),
+    })
+
+    expect(resolved.status).toMatchObject({
+      activeProvider: "openrouter",
+      activeModel: "openai/gpt-4o-mini",
+      keySource: "user",
+      debug: {
+        selectedProvider: "openrouter",
+        selectedModel: "openai/gpt-4o-mini",
+        hasUserOpenRouterKey: true,
+        hasEnvOpenRouterKey: true,
+        finalResolvedProvider: "openrouter",
+        finalResolvedModel: "openai/gpt-4o-mini",
+        keySource: "user",
+      },
+    })
+  })
+
+  it("resolves OpenRouter from env when no user key is configured", () => {
+    const resolved = resolveAIProvider({
+      userSettings: {
+        ai_provider: "openrouter",
+        openrouter_model: "openai/gpt-4o-mini",
+      },
+      secrets: secrets({
+        OPENROUTER_API_KEY: "env-openrouter",
+        OPENROUTER_MODEL: "anthropic/claude-3.5-sonnet",
+      }),
+    })
+
+    expect(resolved.status).toMatchObject({
+      activeProvider: "openrouter",
+      activeModel: "openai/gpt-4o-mini",
+      keySource: "env",
+      debug: {
+        hasUserOpenRouterKey: false,
+        hasEnvOpenRouterKey: true,
+        finalResolvedProvider: "openrouter",
+        keySource: "env",
+      },
     })
   })
 

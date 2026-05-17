@@ -49,6 +49,17 @@ export interface ActiveProviderStatus {
   keySource: "user" | "env" | "mock"
   compatibilityMode?: AICompatibilityMode
   configuredProviders: AIProviderMetadata[]
+  debug: ActiveProviderDebug
+}
+
+export interface ActiveProviderDebug {
+  selectedProvider: string | null
+  selectedModel: string | null
+  hasUserOpenRouterKey: boolean
+  hasEnvOpenRouterKey: boolean
+  finalResolvedProvider: string
+  finalResolvedModel: string
+  keySource: "user" | "env" | "mock"
 }
 
 export interface ResolvedAIProvider {
@@ -99,16 +110,27 @@ export function resolveAIProvider(options: {
 
   const config = provider.config
   const keySource = resolveProviderKeySource(config, secrets)
+  const publicKeySource = keySource === "none" ? "mock" : keySource
+  const activeModel = options.model || config.defaultModel || "unknown"
   return {
     provider,
     registry,
     status: {
       activeProvider: config.id,
       activeProviderName: config.displayName,
-      activeModel: options.model || config.defaultModel || "unknown",
-      keySource: keySource === "none" ? "mock" : keySource,
+      activeModel,
+      keySource: publicKeySource,
       compatibilityMode: config.compatibilityMode,
       configuredProviders: providers.map((candidate) => candidate.getMetadata()),
+      debug: {
+        selectedProvider: selected,
+        selectedModel: selected ? modelForProvider(selected, options.userSettings, secrets) : null,
+        hasUserOpenRouterKey: Boolean(clean(options.userSettings?.openrouter_key)),
+        hasEnvOpenRouterKey: Boolean(secrets.get("OPENROUTER_API_KEY")),
+        finalResolvedProvider: config.id,
+        finalResolvedModel: activeModel,
+        keySource: publicKeySource,
+      },
     },
   }
 }
@@ -272,4 +294,27 @@ function normalizePreferredProviderId(value: string | null | undefined): BuiltIn
 
 function uniqueIds(values: Array<BuiltInAIProviderId | null | undefined>) {
   return Array.from(new Set(values.filter((value): value is BuiltInAIProviderId => Boolean(value))))
+}
+
+function modelForProvider(
+  providerId: BuiltInAIProviderId,
+  userSettings: UserAISettings | null | undefined,
+  secrets: ServerSecretSource
+) {
+  switch (providerId) {
+    case "anthropic":
+      return firstValue(userSettings?.anthropic_model, secrets.get("ANTHROPIC_MODEL"), DEFAULT_MODELS.anthropic)
+    case "openai":
+      return firstValue(userSettings?.openai_model, secrets.get("OPENAI_MODEL"), DEFAULT_MODELS.openai)
+    case "openrouter":
+      return firstValue(userSettings?.openrouter_model, secrets.get("OPENROUTER_MODEL"), DEFAULT_MODELS.openrouter)
+    case "gemini":
+      return firstValue(userSettings?.gemini_model, secrets.get("GEMINI_MODEL"), DEFAULT_MODELS.gemini)
+    case "mistral":
+      return firstValue(userSettings?.mistral_model, secrets.get("MISTRAL_MODEL"), DEFAULT_MODELS.mistral)
+    case "custom":
+      return firstValue(userSettings?.custom_model, secrets.get("CUSTOM_AI_MODEL"))
+    case "mock":
+      return "mock-model"
+  }
 }

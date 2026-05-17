@@ -59,11 +59,13 @@ export async function POST(request: NextRequest) {
       userSettings: normalizeUserAISettings(settings),
     })
 
+    console.info("[ai-generate]", result.providerDebug)
     return NextResponse.json({
       text: result.text,
       provider: result.provider,
       model: result.model,
       keySource: result.keySource,
+      providerDebug: result.providerDebug,
     })
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err)

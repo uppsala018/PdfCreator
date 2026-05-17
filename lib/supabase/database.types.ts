@@ -112,12 +112,15 @@ export interface Database {
           openai_model: string | null
           openai_models: string | null
           openrouter_key: string | null
+          openrouter_api_key: string | null
           openrouter_model: string | null
           openrouter_models: string | null
           gemini_key: string | null
+          gemini_api_key: string | null
           gemini_model: string | null
           gemini_models: string | null
           mistral_key: string | null
+          mistral_api_key: string | null
           mistral_model: string | null
           mistral_models: string | null
           custom_provider_name: string | null
@@ -143,12 +146,15 @@ export interface Database {
           openai_model?: string | null
           openai_models?: string | null
           openrouter_key?: string | null
+          openrouter_api_key?: string | null
           openrouter_model?: string | null
           openrouter_models?: string | null
           gemini_key?: string | null
+          gemini_api_key?: string | null
           gemini_model?: string | null
           gemini_models?: string | null
           mistral_key?: string | null
+          mistral_api_key?: string | null
           mistral_model?: string | null
           mistral_models?: string | null
           custom_provider_name?: string | null
@@ -174,12 +180,15 @@ export interface Database {
           openai_model?: string | null
           openai_models?: string | null
           openrouter_key?: string | null
+          openrouter_api_key?: string | null
           openrouter_model?: string | null
           openrouter_models?: string | null
           gemini_key?: string | null
+          gemini_api_key?: string | null
           gemini_model?: string | null
           gemini_models?: string | null
           mistral_key?: string | null
+          mistral_api_key?: string | null
           mistral_model?: string | null
           mistral_models?: string | null
           custom_provider_name?: string | null

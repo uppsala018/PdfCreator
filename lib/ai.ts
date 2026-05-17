@@ -9,6 +9,7 @@
 import {
   resolveAIProvider,
   type ActiveProviderStatus,
+  type ActiveProviderDebug,
   type UserAISettings,
 } from "@/lib/ai-runtime/provider-resolution"
 
@@ -43,6 +44,7 @@ export interface GenerateResult {
   provider: string
   model: string
   keySource: ActiveProviderStatus["keySource"]
+  providerDebug: ActiveProviderDebug
 }
 
 export async function generateText(opts: GenerateOptions): Promise<GenerateResult> {
@@ -79,5 +81,6 @@ export async function generateText(opts: GenerateOptions): Promise<GenerateResul
     provider: response.providerId,
     model: response.model,
     keySource: resolved.status.keySource,
+    providerDebug: resolved.status.debug,
   }
 }
