@@ -5,6 +5,7 @@ import type { AiEbookFormat, AiStructureIssue } from "@/lib/ai-ebook/ebook-gener
 import { generateLiveStructuredChapters } from "@/lib/ai-ebook/live-chapter-generation"
 import { generateLiveStructuredOutline } from "@/lib/ai-ebook/live-outline-generation"
 import { runControlledRegenerationLoop } from "@/lib/ai-ebook/regeneration-loop"
+import { resolveAIProvider, type UserAISettings } from "@/lib/ai-runtime/provider-resolution"
 import { normalizeSource } from "@/lib/ebook-ingestion/normalize-source"
 import type { ExportTheme } from "@/lib/export/theme-mapping"
 
@@ -53,6 +54,35 @@ export async function POST(request: NextRequest) {
       })
     : undefined
 
+  const { data: settings } = await supabase
+    .from("user_settings")
+    .select([
+      "ai_provider",
+      "anthropic_key",
+      "anthropic_model",
+      "openai_key",
+      "openai_model",
+      "openrouter_key",
+      "openrouter_model",
+      "gemini_key",
+      "gemini_model",
+      "mistral_key",
+      "mistral_model",
+      "custom_provider_name",
+      "custom_api_key",
+      "custom_base_url",
+      "custom_model",
+      "custom_compatibility",
+    ].join(", "))
+    .eq("user_id", user.id)
+    .maybeSingle()
+
+  const resolvedProvider = resolveAIProvider({
+    userSettings: settings as UserAISettings | null,
+    preferredProviderId: input.providerId,
+    model: input.model,
+  })
+
   const outline = await generateLiveStructuredOutline({
     topic: input.topic || sourceDocument?.metadata.title,
     sourceDocument,
@@ -63,6 +93,7 @@ export async function POST(request: NextRequest) {
     outcome: input.ctaGoal,
     brand: input.brand,
     theme: input.theme,
+    provider: resolvedProvider.provider,
     model: input.model,
   })
 
@@ -70,6 +101,7 @@ export async function POST(request: NextRequest) {
     outline: outline.outline,
     audience: input.audience,
     tone: input.tone,
+    provider: resolvedProvider.provider,
     model: input.model,
   })
 
@@ -95,7 +127,12 @@ export async function POST(request: NextRequest) {
       blockCount: draft.chapters.reduce((sum, chapter) => sum + chapter.blocks.length, 0),
       diagnosticsCount: diagnostics.length,
       regenerationPasses: regeneration.metadata.passesRun,
-      provider: chapters.provider,
+      provider: {
+        ...chapters.provider,
+        keySource: resolvedProvider.status.keySource,
+        activeProvider: resolvedProvider.status.activeProvider,
+        activeProviderName: resolvedProvider.status.activeProviderName,
+      },
       source: sourceDocument
         ? {
             inputKind: sourceDocument.metadata.inputKind,
@@ -139,7 +176,7 @@ function normalizeRequest(body: unknown) {
     ctaGoal: stringField(data.ctaGoal),
     brand: stringField(data.brand) || "Ebook Studio",
     theme: THEMES.includes(theme as ExportTheme) ? (theme as ExportTheme) : "luxury-black-gold",
-    providerId: stringField(data.providerId) || "mock",
+    providerId: stringField(data.providerId),
     model: stringField(data.model) || undefined,
   }
 }

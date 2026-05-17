@@ -11,6 +11,11 @@ export type AIProviderKind =
   | "mock"
   | "custom"
 
+export type AICompatibilityMode =
+  | "openai-compatible"
+  | "anthropic-compatible"
+  | "raw-custom"
+
 export interface AIProviderCapabilities {
   textGeneration: boolean
   structuredJson: boolean
@@ -36,7 +41,9 @@ export interface AIProviderConfig {
   baseUrl?: string
   apiKey?: string
   apiKeyEnvVar?: string
+  keySource?: "user" | "env" | "mock"
   defaultModel?: string
+  compatibilityMode?: AICompatibilityMode
   fallbackProviderId?: string
   models?: AIModelConfig[]
   capabilities: AIProviderCapabilities
@@ -106,4 +113,7 @@ export interface AIProviderMetadata {
   capabilities: AIProviderCapabilities
   models: AIModelConfig[]
   configured: boolean
+  defaultModel?: string
+  keySource?: "user" | "env" | "mock" | "none"
+  compatibilityMode?: AICompatibilityMode
 }

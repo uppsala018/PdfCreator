@@ -19,6 +19,16 @@ export function resolveProviderApiKey(
   return secrets.get(config.apiKeyEnvVar)
 }
 
+export function resolveProviderKeySource(
+  config: AIProviderConfig,
+  secrets: ServerSecretSource = processEnvSecretSource
+): "user" | "env" | "mock" | "none" {
+  if (config.kind === "mock") return "mock"
+  if (config.apiKey) return "user"
+  if (config.apiKeyEnvVar && secrets.get(config.apiKeyEnvVar)) return "env"
+  return "none"
+}
+
 export function isProviderConfigured(
   config: AIProviderConfig,
   secrets: ServerSecretSource = processEnvSecretSource
@@ -37,6 +47,8 @@ export function publicProviderConfig(config: AIProviderConfig) {
     models: config.models ?? [],
     capabilities: config.capabilities,
     configured: isProviderConfigured(config),
+    keySource: resolveProviderKeySource(config),
+    compatibilityMode: config.compatibilityMode,
   }
 }
 

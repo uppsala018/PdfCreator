@@ -7,38 +7,29 @@ import {
 } from "@/lib/ai-runtime/provider-config"
 import { AIProviderError, normalizeProviderError } from "@/lib/ai-runtime/provider-errors"
 import type {
-  AIRequest,
   AIProviderConfig,
   AIProviderMetadata,
+  AIRequest,
   AIResponse,
   AIStructuredRequest,
   AIStructuredResponse,
 } from "@/lib/ai-runtime/provider-types"
 
-export interface OpenAICompatibleProviderOptions {
-  id: string
-  displayName: string
-  baseUrl: string
-  apiKeyEnvVar?: string
+export function createAnthropicConfig(options: {
+  id?: string
+  displayName?: string
   apiKey?: string
+  apiKeyEnvVar?: string
   defaultModel: string
-  kind?: AIProviderConfig["kind"]
-  headers?: Record<string, string>
-}
-
-export function createOpenAICompatibleConfig(
-  options: OpenAICompatibleProviderOptions
-): AIProviderConfig {
+}): AIProviderConfig {
   return {
-    id: options.id,
-    kind: options.kind ?? "openai_compatible",
-    displayName: options.displayName,
-    baseUrl: options.baseUrl,
+    id: options.id ?? "anthropic",
+    kind: "anthropic",
+    displayName: options.displayName ?? "Anthropic",
     apiKey: options.apiKey,
     apiKeyEnvVar: options.apiKeyEnvVar,
     defaultModel: options.defaultModel,
-    compatibilityMode: "openai-compatible",
-    headers: options.headers,
+    compatibilityMode: "anthropic-compatible",
     capabilities: {
       textGeneration: true,
       structuredJson: true,
@@ -47,17 +38,11 @@ export function createOpenAICompatibleConfig(
       vision: false,
       streaming: false,
     },
-    models: [
-      {
-        id: options.defaultModel,
-        label: options.defaultModel,
-        supportsStructuredJson: true,
-      },
-    ],
+    models: [{ id: options.defaultModel, label: options.defaultModel, supportsStructuredJson: true }],
   }
 }
 
-export class OpenAICompatibleProvider implements AIProviderAdapter {
+export class AnthropicProvider implements AIProviderAdapter {
   readonly config: AIProviderConfig
 
   constructor(config: AIProviderConfig) {
@@ -80,14 +65,13 @@ export class OpenAICompatibleProvider implements AIProviderAdapter {
   }
 
   async generateText(request: AIRequest): Promise<AIResponse> {
-    const json = await this.createChatCompletion(request)
-    const text = extractOpenAIText(json)
+    const json = await this.createMessage(request)
+    const text = extractAnthropicText(json)
     if (!text) {
-      throw new AIProviderError("INVALID_JSON", "Provider response did not include message content.", {
+      throw new AIProviderError("INVALID_JSON", "Anthropic returned no text content.", {
         providerId: this.config.id,
       })
     }
-
     return {
       providerId: this.config.id,
       model: request.model ?? this.config.defaultModel ?? "unknown",
@@ -103,16 +87,15 @@ export class OpenAICompatibleProvider implements AIProviderAdapter {
     const response = await this.generateText({
       ...request,
       messages: [
-        ...request.messages,
         {
           role: "system",
           content: `Return only valid JSON for schema ${request.json.schemaName}.`,
         },
+        ...request.messages,
       ],
     })
     const parsed = parseJsonFromText(response.text, this.config.id)
     const valid = request.json.validate ? request.json.validate(parsed) : true
-
     return {
       ...response,
       json: parsed as T,
@@ -127,28 +110,18 @@ export class OpenAICompatibleProvider implements AIProviderAdapter {
 
   async validateConnection() {
     const missing: string[] = []
-    if (!this.config.baseUrl) missing.push("baseUrl")
-    if (!this.config.defaultModel) missing.push("defaultModel")
     if (!resolveProviderApiKey(this.config)) missing.push("apiKey")
-
-    if (missing.length > 0) {
-      return {
-        ok: false,
-        message: `Missing OpenAI-compatible provider config: ${missing.join(", ")}.`,
-      }
-    }
-
-    return {
-      ok: true,
-      message: "OpenAI-compatible provider config is valid.",
-    }
+    if (!this.config.defaultModel) missing.push("defaultModel")
+    return missing.length
+      ? { ok: false, message: `Missing Anthropic provider config: ${missing.join(", ")}.` }
+      : { ok: true, message: "Anthropic provider config is valid." }
   }
 
   normalizeError(error: unknown) {
     return normalizeProviderError(error, this.config.id)
   }
 
-  private async createChatCompletion(request: AIRequest): Promise<unknown> {
+  private async createMessage(request: AIRequest): Promise<unknown> {
     const validation = await this.validateConnection()
     if (!validation.ok) {
       throw new AIProviderError("CONFIGURATION_ERROR", validation.message ?? "Invalid provider config.", {
@@ -156,53 +129,54 @@ export class OpenAICompatibleProvider implements AIProviderAdapter {
       })
     }
 
-    const key = resolveProviderApiKey(this.config)
+    const system = request.messages
+      .filter((message) => message.role === "system")
+      .map((message) => message.content)
+      .join("\n\n")
+    const messages = request.messages
+      .filter((message) => message.role !== "system")
+      .map((message) => ({ role: message.role === "assistant" ? "assistant" : "user", content: message.content }))
     const controller = new AbortController()
     const timeout = setTimeout(() => controller.abort(), 60_000)
 
     try {
-      const response = await fetch(`${this.config.baseUrl?.replace(/\/$/, "")}/chat/completions`, {
+      const response = await fetch("https://api.anthropic.com/v1/messages", {
         method: "POST",
         signal: controller.signal,
         headers: {
           "Content-Type": "application/json",
-          Authorization: `Bearer ${key}`,
-          ...(this.config.headers ?? {}),
+          "x-api-key": resolveProviderApiKey(this.config) ?? "",
+          "anthropic-version": "2023-06-01",
         },
         body: JSON.stringify({
           model: request.model ?? this.config.defaultModel,
-          messages: request.messages,
-          temperature: request.temperature ?? 0.7,
           max_tokens: request.maxOutputTokens ?? 2048,
+          temperature: request.temperature ?? 0.7,
+          system: system || undefined,
+          messages,
         }),
       })
-
       const text = await response.text()
       let json: unknown
       try {
         json = text ? JSON.parse(text) : {}
       } catch (error) {
-        throw new AIProviderError("INVALID_JSON", "Provider returned malformed JSON.", {
+        throw new AIProviderError("INVALID_JSON", "Anthropic returned malformed JSON.", {
           providerId: this.config.id,
           status: response.status,
           cause: error,
         })
       }
-
       if (!response.ok) {
         throw normalizeProviderError(
-          {
-            status: response.status,
-            message: extractProviderErrorMessage(json) ?? response.statusText,
-          },
+          { status: response.status, message: extractProviderErrorMessage(json) ?? response.statusText },
           this.config.id
         )
       }
-
       return json
     } catch (error) {
       if (error instanceof DOMException && error.name === "AbortError") {
-        throw new AIProviderError("PROVIDER_UNAVAILABLE", "Provider request timed out.", {
+        throw new AIProviderError("PROVIDER_UNAVAILABLE", "Anthropic request timed out.", {
           providerId: this.config.id,
           retryable: true,
           cause: error,
@@ -215,19 +189,22 @@ export class OpenAICompatibleProvider implements AIProviderAdapter {
   }
 }
 
-function extractOpenAIText(value: unknown): string | null {
-  const choices = (value as { choices?: Array<{ message?: { content?: unknown } }> })?.choices
-  const content = choices?.[0]?.message?.content
-  return typeof content === "string" ? content : null
+function extractAnthropicText(value: unknown): string | null {
+  const content = (value as { content?: Array<{ type?: string; text?: unknown }> }).content
+  const text = content?.find((block) => block.type === "text")?.text
+  return typeof text === "string" ? text : null
 }
 
 function normalizeUsage(value: unknown) {
-  const usage = (value as { usage?: { prompt_tokens?: number; completion_tokens?: number; total_tokens?: number } }).usage
+  const usage = (value as { usage?: { input_tokens?: number; output_tokens?: number } }).usage
   if (!usage) return undefined
   return {
-    inputTokens: usage.prompt_tokens,
-    outputTokens: usage.completion_tokens,
-    totalTokens: usage.total_tokens,
+    inputTokens: usage.input_tokens,
+    outputTokens: usage.output_tokens,
+    totalTokens:
+      typeof usage.input_tokens === "number" && typeof usage.output_tokens === "number"
+        ? usage.input_tokens + usage.output_tokens
+        : undefined,
   }
 }
 
@@ -238,7 +215,6 @@ function parseJsonFromText(text: string, providerId: string): unknown {
     trimmed.match(/```(?:json)?\s*([\s\S]*?)```/)?.[1],
     trimmed.match(/\{[\s\S]*\}/)?.[0],
   ].filter((candidate): candidate is string => Boolean(candidate))
-
   for (const candidate of candidates) {
     try {
       return JSON.parse(candidate)
@@ -246,8 +222,7 @@ function parseJsonFromText(text: string, providerId: string): unknown {
       continue
     }
   }
-
-  throw new AIProviderError("INVALID_JSON", "Provider response was not valid JSON.", {
+  throw new AIProviderError("INVALID_JSON", "Anthropic response was not valid JSON.", {
     providerId,
   })
 }

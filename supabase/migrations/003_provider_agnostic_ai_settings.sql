@@ -1,0 +1,15 @@
+alter table user_settings
+  add column if not exists ai_provider text,
+  add column if not exists anthropic_model text,
+  add column if not exists openai_model text,
+  add column if not exists openrouter_key text,
+  add column if not exists openrouter_model text,
+  add column if not exists gemini_key text,
+  add column if not exists gemini_model text,
+  add column if not exists mistral_key text,
+  add column if not exists mistral_model text,
+  add column if not exists custom_provider_name text,
+  add column if not exists custom_api_key text,
+  add column if not exists custom_base_url text,
+  add column if not exists custom_model text,
+  add column if not exists custom_compatibility text;

@@ -2,72 +2,205 @@
 
 import { useState } from "react"
 import Link from "next/link"
-import {
-  CheckCircle2,
-  XCircle,
-  Eye,
-  EyeOff,
-  Loader2,
-  KeyRound,
-  ExternalLink,
-} from "lucide-react"
+import { CheckCircle2, Eye, EyeOff, KeyRound, Loader2, XCircle } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Separator } from "@/components/ui/separator"
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select"
+import type { AICompatibilityMode } from "@/lib/ai-runtime/provider-types"
+import type { ActiveProviderStatus } from "@/lib/ai-runtime/provider-resolution"
 import { cn } from "@/lib/utils"
 
-// ─── Types ────────────────────────────────────────────────────────────────────
+type ProviderId = "openai" | "anthropic" | "openrouter" | "gemini" | "mistral" | "custom"
 
 interface KeyState {
+  ai_provider: string | null
   anthropic_configured: boolean
-  openai_configured:    boolean
-  anthropic_masked:     string | null
-  openai_masked:        string | null
+  openai_configured: boolean
+  openrouter_configured: boolean
+  gemini_configured: boolean
+  mistral_configured: boolean
+  custom_configured: boolean
+  anthropic_masked: string | null
+  openai_masked: string | null
+  openrouter_masked: string | null
+  gemini_masked: string | null
+  mistral_masked: string | null
+  custom_masked: string | null
+  anthropic_model: string
+  openai_model: string
+  openrouter_model: string
+  gemini_model: string
+  mistral_model: string
+  custom_provider_name: string
+  custom_base_url: string
+  custom_model: string
+  custom_compatibility: AICompatibilityMode
+  providerStatus: ActiveProviderStatus
 }
 
 interface SettingsClientProps {
-  userEmail:    string
+  userEmail: string
   initialState: KeyState
 }
 
-// ─── Key row sub-component ────────────────────────────────────────────────────
+const PROVIDERS: Array<{ id: ProviderId; label: string; hint: string; modelHint: string }> = [
+  { id: "openai", label: "OpenAI", hint: "OpenAI API or compatible OpenAI account key.", modelHint: "gpt-4o-mini" },
+  { id: "anthropic", label: "Anthropic", hint: "Claude API key.", modelHint: "claude-haiku-4-5-20251001" },
+  { id: "openrouter", label: "OpenRouter", hint: "OpenRouter key for routed models.", modelHint: "openai/gpt-4o-mini" },
+  { id: "gemini", label: "Google Gemini", hint: "Gemini key via Google AI Studio.", modelHint: "gemini-2.0-flash" },
+  { id: "mistral", label: "Mistral", hint: "Mistral API key.", modelHint: "mistral-small-latest" },
+  { id: "custom", label: "Other / Custom", hint: "Self-hosted or custom AI endpoint.", modelHint: "model-name" },
+]
 
-interface KeyRowProps {
-  provider:     "anthropic" | "openai"
-  label:        string
-  hint:         string
-  docsUrl:      string
-  configured:   boolean
-  masked:       string | null
-  onSave:       (key: string) => Promise<void>
-  onClear:      () => Promise<void>
+function keyName(provider: ProviderId) {
+  return `${provider === "custom" ? "custom_api" : provider}_key`
 }
 
-function KeyRow({
-  provider,
-  label,
-  hint,
-  docsUrl,
-  configured,
-  masked,
-  onSave,
-  onClear,
-}: KeyRowProps) {
-  const [value,   setValue]   = useState("")
-  const [show,    setShow]    = useState(false)
-  const [loading, setLoading] = useState(false)
-  const [error,   setError]   = useState<string | null>(null)
-  const [mode,    setMode]    = useState<"view" | "edit">("view")
+function modelName(provider: ProviderId) {
+  return `${provider}_model`
+}
 
-  async function handleSave() {
-    if (!value.trim()) return
+export default function SettingsClient({ userEmail, initialState }: SettingsClientProps) {
+  const [state, setState] = useState<KeyState>(initialState)
+  const [savingProvider, setSavingProvider] = useState(false)
+
+  async function patchSettings(patch: Record<string, string | null>) {
+    const res = await fetch("/api/settings", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(patch),
+    })
+    const json = await res.json()
+    if (!res.ok) throw new Error(json.error ?? "Failed to save settings")
+    setState(json as KeyState)
+  }
+
+  async function setProvider(provider: string) {
+    setSavingProvider(true)
+    try {
+      await patchSettings({ ai_provider: provider })
+    } finally {
+      setSavingProvider(false)
+    }
+  }
+
+  const active = state.providerStatus
+
+  return (
+    <div className="mx-auto max-w-3xl px-6 py-10 space-y-8">
+      <div>
+        <h1 className="text-2xl font-bold text-white tracking-tight">Settings</h1>
+        <p className="mt-1 text-sm text-slate-500">
+          Manage AI providers and account preferences.
+        </p>
+      </div>
+
+      <section className="space-y-4">
+        <div>
+          <h2 className="text-base font-semibold text-white">AI Provider</h2>
+          <p className="mt-0.5 text-xs text-slate-500 leading-relaxed">
+            User keys are stored server-side. Env keys can be used as defaults without exposing them to the browser.
+          </p>
+        </div>
+
+        <div className="rounded-xl border border-[#1e3a52] bg-[#0a1929] p-5 space-y-4">
+          <div className="grid gap-4 md:grid-cols-[1fr_1fr]">
+            <div className="space-y-1.5">
+              <Label className="text-slate-300 text-xs">Preferred provider</Label>
+              <Select value={state.ai_provider ?? active.activeProvider} onValueChange={setProvider}>
+                <SelectTrigger className="bg-[#0D1B2A] border-[#1e3a52] text-white">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {PROVIDERS.map((provider) => (
+                    <SelectItem key={provider.id} value={provider.id}>{provider.label}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="rounded-lg border border-[#1e3a52] bg-[#0D1B2A] px-4 py-3 text-xs text-slate-300">
+              <div className="font-semibold text-white">{active.activeProviderName}</div>
+              <div className="mt-1">Model: {active.activeModel}</div>
+              <div>Key source: {active.keySource}</div>
+              {savingProvider && <div className="mt-1 text-[#C9A84C]">Saving preference...</div>}
+            </div>
+          </div>
+        </div>
+
+        <div className="grid gap-4">
+          {PROVIDERS.map((provider) => (
+            <ProviderCard
+              key={provider.id}
+              provider={provider}
+              state={state}
+              onPatch={patchSettings}
+            />
+          ))}
+        </div>
+      </section>
+
+      <Separator className="bg-[#1e3a52]" />
+
+      <section className="space-y-3">
+        <h2 className="text-base font-semibold text-white">Account</h2>
+        <div className="rounded-xl border border-[#1e3a52] bg-[#0a1929] px-5 py-4 flex items-center justify-between">
+          <div>
+            <p className="text-sm text-white font-medium">{userEmail}</p>
+            <p className="text-xs text-slate-500 mt-0.5">Signed in via Supabase Auth</p>
+          </div>
+          <Link href="/dashboard" className="text-xs text-slate-500 hover:text-white transition-colors">
+            Back to projects
+          </Link>
+        </div>
+      </section>
+    </div>
+  )
+}
+
+function ProviderCard({
+  provider,
+  state,
+  onPatch,
+}: {
+  provider: { id: ProviderId; label: string; hint: string; modelHint: string }
+  state: KeyState
+  onPatch: (patch: Record<string, string | null>) => Promise<void>
+}) {
+  const configured = Boolean(state[`${provider.id}_configured` as keyof KeyState])
+  const masked = state[`${provider.id}_masked` as keyof KeyState] as string | null
+  const initialModel = state[modelName(provider.id) as keyof KeyState] as string
+  const [key, setKey] = useState("")
+  const [model, setModel] = useState(initialModel)
+  const [show, setShow] = useState(false)
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const [customName, setCustomName] = useState(state.custom_provider_name)
+  const [baseUrl, setBaseUrl] = useState(state.custom_base_url)
+  const [compatibility, setCompatibility] = useState<AICompatibilityMode>(state.custom_compatibility)
+
+  async function save() {
     setLoading(true)
     setError(null)
     try {
-      await onSave(value.trim())
-      setValue("")
-      setMode("view")
+      const patch: Record<string, string | null> = {
+        [modelName(provider.id)]: model,
+      }
+      if (key.trim()) patch[keyName(provider.id)] = key.trim()
+      if (provider.id === "custom") {
+        patch.custom_provider_name = customName
+        patch.custom_base_url = baseUrl
+        patch.custom_compatibility = compatibility
+      }
+      await onPatch(patch)
+      setKey("")
     } catch (e) {
       setError(e instanceof Error ? e.message : "Save failed")
     } finally {
@@ -75,12 +208,11 @@ function KeyRow({
     }
   }
 
-  async function handleClear() {
+  async function clearKey() {
     setLoading(true)
     setError(null)
     try {
-      await onClear()
-      setMode("view")
+      await onPatch({ [keyName(provider.id)]: "" })
     } catch (e) {
       setError(e instanceof Error ? e.message : "Clear failed")
     } finally {
@@ -90,231 +222,148 @@ function KeyRow({
 
   return (
     <div className="rounded-xl border border-[#1e3a52] bg-[#0a1929] p-5 space-y-4">
-      {/* Header row */}
       <div className="flex items-start justify-between gap-4">
         <div className="space-y-1">
           <div className="flex items-center gap-2">
             <KeyRound className="h-4 w-4 text-[#C9A84C]" />
-            <span className="font-semibold text-white text-sm">{label}</span>
+            <span className="font-semibold text-white text-sm">{provider.label}</span>
             {configured ? (
               <span className="flex items-center gap-1 text-emerald-400 text-xs">
-                <CheckCircle2 className="h-3.5 w-3.5" /> Configured
+                <CheckCircle2 className="h-3.5 w-3.5" /> User key
               </span>
             ) : (
               <span className="flex items-center gap-1 text-slate-600 text-xs">
-                <XCircle className="h-3.5 w-3.5" /> Not set
+                <XCircle className="h-3.5 w-3.5" /> No user key
               </span>
             )}
           </div>
-          <p className="text-xs text-slate-500">{hint}</p>
-          <a
-            href={docsUrl}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="inline-flex items-center gap-1 text-xs text-[#C9A84C] hover:underline"
-          >
-            Get API key <ExternalLink className="h-3 w-3" />
-          </a>
+          <p className="text-xs text-slate-500">{provider.hint}</p>
         </div>
-
-        <div className="flex items-center gap-2 shrink-0">
-          {configured && mode === "view" && (
-            <>
-              <span className="font-mono text-xs text-slate-500 hidden sm:block">
-                {masked}
-              </span>
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => setMode("edit")}
-                className="border-[#1e3a52] text-slate-400 hover:text-white text-xs h-7"
-              >
-                Replace
-              </Button>
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={handleClear}
-                disabled={loading}
-                className="border-red-500/30 text-red-400 hover:bg-red-500/10 text-xs h-7"
-              >
-                {loading ? <Loader2 className="h-3 w-3 animate-spin" /> : "Clear"}
-              </Button>
-            </>
-          )}
-          {!configured && mode === "view" && (
-            <Button
-              size="sm"
-              onClick={() => setMode("edit")}
-              className="bg-[#C9A84C] hover:bg-[#e0b85a] text-[#0D1B2A] font-semibold text-xs h-7"
-            >
-              Add key
-            </Button>
-          )}
-        </div>
+        {masked && <span className="font-mono text-xs text-slate-500 hidden sm:block">{masked}</span>}
       </div>
 
-      {/* Edit mode */}
-      {mode === "edit" && (
-        <div className="space-y-3 pt-1 border-t border-[#1e3a52]">
-          <div className="space-y-1.5">
-            <Label htmlFor={`${provider}-key`} className="text-slate-300 text-xs">
-              Paste your {label}
-            </Label>
-            <div className="relative">
-              <Input
-                id={`${provider}-key`}
-                type={show ? "text" : "password"}
-                value={value}
-                onChange={(e) => setValue(e.target.value)}
-                onKeyDown={(e) => { if (e.key === "Enter") handleSave() }}
-                placeholder={provider === "anthropic" ? "sk-ant-..." : "sk-..."}
-                autoComplete="off"
-                className={cn(
-                  "pr-9 font-mono text-sm",
-                  "bg-[#0D1B2A] border-[#1e3a52] text-white placeholder:text-slate-700",
-                  "focus-visible:ring-[#C9A84C] focus-visible:border-[#C9A84C]"
-                )}
-              />
-              <button
-                type="button"
-                onClick={() => setShow((v) => !v)}
-                className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-600 hover:text-slate-300"
-              >
-                {show ? <EyeOff className="h-3.5 w-3.5" /> : <Eye className="h-3.5 w-3.5" />}
-              </button>
+      <div className="grid gap-3 md:grid-cols-2">
+        {provider.id === "custom" && (
+          <>
+            <Field label="Provider display name" value={customName} onChange={setCustomName} placeholder="Local LLM" />
+            <Field label="Base URL" value={baseUrl} onChange={setBaseUrl} placeholder="http://localhost:11434/v1" />
+            <div className="space-y-1.5">
+              <Label className="text-slate-300 text-xs">API compatibility mode</Label>
+              <Select value={compatibility} onValueChange={(value) => setCompatibility(value as AICompatibilityMode)}>
+                <SelectTrigger className="bg-[#0D1B2A] border-[#1e3a52] text-white">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="openai-compatible">OpenAI-compatible</SelectItem>
+                  <SelectItem value="anthropic-compatible">Anthropic-compatible</SelectItem>
+                  <SelectItem value="raw-custom">Raw/custom placeholder</SelectItem>
+                </SelectContent>
+              </Select>
             </div>
-          </div>
+          </>
+        )}
+        <SecretField
+          label="API key"
+          value={key}
+          show={show}
+          onShow={() => setShow((value) => !value)}
+          onChange={setKey}
+          placeholder={configured ? "Leave blank to keep existing key" : "Paste API key"}
+        />
+        <Field label="Model name" value={model} onChange={setModel} placeholder={provider.modelHint} />
+      </div>
 
-          {error && (
-            <p className="text-xs text-red-400 border border-red-500/20 bg-red-500/5 rounded px-3 py-1.5">
-              {error}
-            </p>
-          )}
+      {error && <p className="text-xs text-red-400 border border-red-500/20 bg-red-500/5 rounded px-3 py-1.5">{error}</p>}
 
-          <div className="flex items-center gap-2">
-            <Button
-              size="sm"
-              onClick={handleSave}
-              disabled={loading || !value.trim()}
-              className="bg-[#C9A84C] hover:bg-[#e0b85a] text-[#0D1B2A] font-semibold text-xs h-7 min-w-[80px]"
-            >
-              {loading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : "Save key"}
-            </Button>
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={() => { setMode("view"); setValue(""); setError(null) }}
-              disabled={loading}
-              className="text-slate-500 hover:text-white text-xs h-7"
-            >
-              Cancel
-            </Button>
-          </div>
-        </div>
-      )}
+      <div className="flex items-center gap-2">
+        <Button
+          size="sm"
+          onClick={save}
+          disabled={loading}
+          className="bg-[#C9A84C] hover:bg-[#e0b85a] text-[#0D1B2A] font-semibold text-xs h-8"
+        >
+          {loading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : "Save"}
+        </Button>
+        {configured && (
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={clearKey}
+            disabled={loading}
+            className="border-red-500/30 text-red-400 hover:bg-red-500/10 text-xs h-8"
+          >
+            Clear key
+          </Button>
+        )}
+      </div>
     </div>
   )
 }
 
-// ─── Main settings client ─────────────────────────────────────────────────────
-
-export default function SettingsClient({ userEmail, initialState }: SettingsClientProps) {
-  const [keyState, setKeyState] = useState<KeyState>(initialState)
-
-  async function saveKey(provider: "anthropic" | "openai", key: string) {
-    const res = await fetch("/api/settings", {
-      method:  "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body:    JSON.stringify(
-        provider === "anthropic" ? { anthropic_key: key } : { openai_key: key }
-      ),
-    })
-    const json = await res.json()
-    if (!res.ok) throw new Error(json.error ?? "Failed to save key")
-    setKeyState(json as KeyState)
-  }
-
-  async function clearKey(provider: "anthropic" | "openai") {
-    const res = await fetch("/api/settings", {
-      method:  "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body:    JSON.stringify(
-        provider === "anthropic" ? { anthropic_key: "" } : { openai_key: "" }
-      ),
-    })
-    const json = await res.json()
-    if (!res.ok) throw new Error(json.error ?? "Failed to clear key")
-    setKeyState(json as KeyState)
-  }
-
+function Field({
+  label,
+  value,
+  onChange,
+  placeholder,
+}: {
+  label: string
+  value: string
+  onChange: (value: string) => void
+  placeholder: string
+}) {
   return (
-    <div className="mx-auto max-w-2xl px-6 py-10 space-y-8">
-      {/* Page header */}
-      <div>
-        <h1 className="text-2xl font-bold text-white tracking-tight">Settings</h1>
-        <p className="mt-1 text-sm text-slate-500">
-          Manage your AI API keys and account preferences.
-        </p>
+    <div className="space-y-1.5">
+      <Label className="text-slate-300 text-xs">{label}</Label>
+      <Input
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+        placeholder={placeholder}
+        className="bg-[#0D1B2A] border-[#1e3a52] text-white placeholder:text-slate-700 focus-visible:ring-[#C9A84C]"
+      />
+    </div>
+  )
+}
+
+function SecretField({
+  label,
+  value,
+  show,
+  onShow,
+  onChange,
+  placeholder,
+}: {
+  label: string
+  value: string
+  show: boolean
+  onShow: () => void
+  onChange: (value: string) => void
+  placeholder: string
+}) {
+  return (
+    <div className="space-y-1.5">
+      <Label className="text-slate-300 text-xs">{label}</Label>
+      <div className="relative">
+        <Input
+          type={show ? "text" : "password"}
+          value={value}
+          onChange={(event) => onChange(event.target.value)}
+          placeholder={placeholder}
+          autoComplete="off"
+          className={cn(
+            "pr-9 font-mono text-sm",
+            "bg-[#0D1B2A] border-[#1e3a52] text-white placeholder:text-slate-700",
+            "focus-visible:ring-[#C9A84C] focus-visible:border-[#C9A84C]"
+          )}
+        />
+        <button
+          type="button"
+          onClick={onShow}
+          className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-600 hover:text-slate-300"
+          aria-label={show ? "Hide API key" : "Show API key"}
+        >
+          {show ? <EyeOff className="h-3.5 w-3.5" /> : <Eye className="h-3.5 w-3.5" />}
+        </button>
       </div>
-
-      {/* AI API Keys */}
-      <section className="space-y-4">
-        <div>
-          <h2 className="text-base font-semibold text-white">AI API Keys</h2>
-          <p className="mt-0.5 text-xs text-slate-500 leading-relaxed">
-            Keys are stored securely and never exposed to the browser after saving.
-            Anthropic Claude is used as the primary provider; OpenAI is the fallback.
-          </p>
-        </div>
-
-        <KeyRow
-          provider="anthropic"
-          label="Anthropic API Key"
-          hint="Used for Claude — the primary AI provider."
-          docsUrl="https://console.anthropic.com/settings/keys"
-          configured={keyState.anthropic_configured}
-          masked={keyState.anthropic_masked}
-          onSave={(key) => saveKey("anthropic", key)}
-          onClear={() => clearKey("anthropic")}
-        />
-
-        <KeyRow
-          provider="openai"
-          label="OpenAI API Key"
-          hint="Used as fallback when no Anthropic key is set."
-          docsUrl="https://platform.openai.com/api-keys"
-          configured={keyState.openai_configured}
-          masked={keyState.openai_masked}
-          onSave={(key) => saveKey("openai", key)}
-          onClear={() => clearKey("openai")}
-        />
-
-        {!keyState.anthropic_configured && !keyState.openai_configured && (
-          <div className="rounded-lg border border-amber-500/20 bg-amber-500/5 px-4 py-3 text-xs text-amber-400">
-            Add at least one API key to enable AI generation in the editor.
-          </div>
-        )}
-      </section>
-
-      <Separator className="bg-[#1e3a52]" />
-
-      {/* Account */}
-      <section className="space-y-3">
-        <h2 className="text-base font-semibold text-white">Account</h2>
-        <div className="rounded-xl border border-[#1e3a52] bg-[#0a1929] px-5 py-4 flex items-center justify-between">
-          <div>
-            <p className="text-sm text-white font-medium">{userEmail}</p>
-            <p className="text-xs text-slate-500 mt-0.5">Signed in via Supabase Auth</p>
-          </div>
-          <Link
-            href="/dashboard"
-            className="text-xs text-slate-500 hover:text-white transition-colors"
-          >
-            Back to projects
-          </Link>
-        </div>
-      </section>
     </div>
   )
 }

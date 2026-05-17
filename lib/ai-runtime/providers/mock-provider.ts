@@ -37,6 +37,7 @@ export class MockAIProvider implements AIProviderAdapter {
         streaming: false,
       },
       models: [{ id: "mock-model", label: "Mock Model", supportsStructuredJson: true }],
+      keySource: "mock",
     }
   }
 
@@ -48,6 +49,8 @@ export class MockAIProvider implements AIProviderAdapter {
       capabilities: this.config.capabilities,
       models: this.config.models ?? [],
       configured: true,
+      defaultModel: this.config.defaultModel,
+      keySource: "mock",
     }
   }
 

@@ -6,6 +6,19 @@ import {
   OpenAICompatibleProvider,
   createOpenAICompatibleConfig,
 } from "@/lib/ai-runtime/providers/openai-compatible"
+import {
+  publicProviderStatus,
+  resolveAIProvider,
+  type UserAISettings,
+} from "@/lib/ai-runtime/provider-resolution"
+
+function secrets(values: Record<string, string | undefined>) {
+  return {
+    get(name: string) {
+      return values[name]
+    },
+  }
+}
 
 describe("AI provider runtime", () => {
   it("registers and resolves providers", () => {
@@ -81,19 +94,121 @@ describe("AI provider runtime", () => {
         displayName: "Local Compatible",
         baseUrl: "http://localhost:11434/v1",
         defaultModel: "local-model",
-        apiKeyEnvVar: "LOCAL_AI_KEY",
+        apiKey: "local-key",
       })
     )
 
     await expect(provider.validateConnection()).resolves.toEqual({
       ok: true,
-      message: "OpenAI-compatible provider config is valid. Live calls are disabled.",
+      message: "OpenAI-compatible provider config is valid.",
     })
     expect(provider.getMetadata()).toMatchObject({
       id: "local-compatible",
       kind: "openai_compatible",
-      configured: false,
+      configured: true,
     })
+  })
+
+  it("resolves env configured providers before mock", () => {
+    const resolved = resolveAIProvider({
+      secrets: secrets({
+        AI_PROVIDER: "openrouter",
+        OPENROUTER_API_KEY: "env-openrouter",
+        OPENROUTER_MODEL: "anthropic/claude-3.5-sonnet",
+      }),
+    })
+
+    expect(resolved.status).toMatchObject({
+      activeProvider: "openrouter",
+      activeModel: "anthropic/claude-3.5-sonnet",
+      keySource: "env",
+    })
+  })
+
+  it("resolves user settings provider before env providers", () => {
+    const userSettings: UserAISettings = {
+      ai_provider: "mistral",
+      mistral_key: "user-mistral",
+      mistral_model: "mistral-large-latest",
+    }
+    const resolved = resolveAIProvider({
+      userSettings,
+      secrets: secrets({ OPENAI_API_KEY: "env-openai", OPENAI_MODEL: "gpt-4o" }),
+    })
+
+    expect(resolved.status).toMatchObject({
+      activeProvider: "mistral",
+      activeModel: "mistral-large-latest",
+      keySource: "user",
+    })
+  })
+
+  it("falls back to env when selected user settings are missing a key", () => {
+    const resolved = resolveAIProvider({
+      userSettings: { ai_provider: "anthropic", anthropic_model: "claude-missing-key" },
+      secrets: secrets({ OPENAI_API_KEY: "env-openai", OPENAI_MODEL: "gpt-4o-mini" }),
+    })
+
+    expect(resolved.status).toMatchObject({
+      activeProvider: "openai",
+      activeModel: "gpt-4o-mini",
+      keySource: "env",
+    })
+  })
+
+  it("falls back to mock when no provider is configured", () => {
+    const resolved = resolveAIProvider({ secrets: secrets({}) })
+
+    expect(resolved.status).toMatchObject({
+      activeProvider: "mock",
+      activeModel: "mock-model",
+      keySource: "mock",
+    })
+  })
+
+  it("validates custom provider config", async () => {
+    const missingBaseUrl = resolveAIProvider({
+      userSettings: {
+        ai_provider: "custom",
+        custom_api_key: "custom-key",
+        custom_model: "custom-model",
+        custom_compatibility: "openai-compatible",
+      },
+      secrets: secrets({}),
+    })
+
+    expect(missingBaseUrl.status.activeProvider).toBe("mock")
+
+    const configured = resolveAIProvider({
+      userSettings: {
+        ai_provider: "custom",
+        custom_api_key: "custom-key",
+        custom_base_url: "http://localhost:11434/v1",
+        custom_model: "custom-model",
+        custom_compatibility: "openai-compatible",
+      },
+      secrets: secrets({}),
+    })
+
+    await expect(configured.provider.validateConnection()).resolves.toMatchObject({ ok: true })
+    expect(configured.status).toMatchObject({
+      activeProvider: "custom",
+      activeModel: "custom-model",
+      keySource: "user",
+    })
+  })
+
+  it("does not return secrets in public provider status", () => {
+    const status = publicProviderStatus(
+      { ai_provider: "openai", openai_key: "user-secret", openai_model: "gpt-4o" },
+      secrets({ ANTHROPIC_API_KEY: "env-secret" })
+    )
+
+    expect(JSON.stringify(status)).not.toContain("user-secret")
+    expect(JSON.stringify(status)).not.toContain("env-secret")
+    expect(
+      status.configuredProviders.every((provider) => !("apiKey" in provider) && !("apiKeyEnvVar" in provider))
+    ).toBe(true)
   })
 
   it("normalizes provider errors by status", () => {

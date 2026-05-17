@@ -1,15 +1,16 @@
 import { type NextRequest, NextResponse } from "next/server"
 import { createClient } from "@/lib/supabase/server"
 import { generateText } from "@/lib/ai"
+import type { UserAISettings } from "@/lib/ai-runtime/provider-resolution"
 
 // ─── POST /api/ai-generate ────────────────────────────────────────────────────
 //
 // Body:  { prompt: string, context?: string }
-// Happy: { text: string, provider: "anthropic" | "openai" }
+// Happy: { text: string, provider: string, model: string, keySource: string }
 //
 // Key resolution order:
 //   1. Per-user key in user_settings table
-//   2. Server env var (ANTHROPIC_API_KEY / OPENAI_API_KEY)
+//   2. Server env vars for all configured providers
 //
 // Returns 503 if no key is configured so the UI can show
 // "Add an API key in Settings" instead of a generic error.
@@ -43,7 +44,24 @@ export async function POST(request: NextRequest) {
   // ── Load user API keys (server-side only — never returned to the client) ────
   const { data: settings } = await supabase
     .from("user_settings")
-    .select("anthropic_key, openai_key")
+    .select([
+      "ai_provider",
+      "anthropic_key",
+      "anthropic_model",
+      "openai_key",
+      "openai_model",
+      "openrouter_key",
+      "openrouter_model",
+      "gemini_key",
+      "gemini_model",
+      "mistral_key",
+      "mistral_model",
+      "custom_provider_name",
+      "custom_api_key",
+      "custom_base_url",
+      "custom_model",
+      "custom_compatibility",
+    ].join(", "))
     .eq("user_id", user.id)
     .maybeSingle()
 
@@ -52,11 +70,15 @@ export async function POST(request: NextRequest) {
     const result = await generateText({
       prompt: prompt.trim(),
       context: typeof context === "string" ? context : undefined,
-      userAnthropicKey: settings?.anthropic_key ?? null,
-      userOpenaiKey:    settings?.openai_key    ?? null,
+      userSettings: settings as UserAISettings | null,
     })
 
-    return NextResponse.json({ text: result.text, provider: result.provider })
+    return NextResponse.json({
+      text: result.text,
+      provider: result.provider,
+      model: result.model,
+      keySource: result.keySource,
+    })
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err)
 

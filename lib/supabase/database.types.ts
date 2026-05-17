@@ -102,22 +102,64 @@ export interface Database {
         Row: {
           id: string
           user_id: string
+          ai_provider: string | null
           anthropic_key: string | null
+          anthropic_model: string | null
           openai_key: string | null
+          openai_model: string | null
+          openrouter_key: string | null
+          openrouter_model: string | null
+          gemini_key: string | null
+          gemini_model: string | null
+          mistral_key: string | null
+          mistral_model: string | null
+          custom_provider_name: string | null
+          custom_api_key: string | null
+          custom_base_url: string | null
+          custom_model: string | null
+          custom_compatibility: string | null
           updated_at: string
         }
         Insert: {
           id?: string
           user_id: string
+          ai_provider?: string | null
           anthropic_key?: string | null
+          anthropic_model?: string | null
           openai_key?: string | null
+          openai_model?: string | null
+          openrouter_key?: string | null
+          openrouter_model?: string | null
+          gemini_key?: string | null
+          gemini_model?: string | null
+          mistral_key?: string | null
+          mistral_model?: string | null
+          custom_provider_name?: string | null
+          custom_api_key?: string | null
+          custom_base_url?: string | null
+          custom_model?: string | null
+          custom_compatibility?: string | null
           updated_at?: string
         }
         Update: {
           id?: string
           user_id?: string
+          ai_provider?: string | null
           anthropic_key?: string | null
+          anthropic_model?: string | null
           openai_key?: string | null
+          openai_model?: string | null
+          openrouter_key?: string | null
+          openrouter_model?: string | null
+          gemini_key?: string | null
+          gemini_model?: string | null
+          mistral_key?: string | null
+          mistral_model?: string | null
+          custom_provider_name?: string | null
+          custom_api_key?: string | null
+          custom_base_url?: string | null
+          custom_model?: string | null
+          custom_compatibility?: string | null
           updated_at?: string
         }
         Relationships: [
