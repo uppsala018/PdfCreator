@@ -114,6 +114,11 @@ describe("generateLiveStructuredOutline", () => {
         expect.objectContaining({ code: "EMPTY_BLOCKS_REPAIRED" }),
       ])
     )
+    expect(result.diagnostics).not.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ code: "EMPTY_BLOCKS_REPAIRED" }),
+      ])
+    )
     expect(result.normalized.ebook.chapters).toHaveLength(3)
   })
 

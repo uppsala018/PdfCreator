@@ -71,16 +71,16 @@ export interface ResolvedAIProvider {
 const DEFAULT_MODELS: Record<Exclude<BuiltInAIProviderId, "custom" | "mock">, string> = {
   openai: "gpt-4o-mini",
   anthropic: "claude-haiku-4-5-20251001",
-  openrouter: "openrouter/free",
+  openrouter: "nvidia/nemotron-3-super-120b-a12b:free",
   gemini: "gemini-2.0-flash",
   mistral: "mistral-small-latest",
 }
 
 const OPENROUTER_FALLBACK_MODELS = [
-  "openrouter/free",
   "nvidia/nemotron-3-super-120b-a12b:free",
-  "google/gemma-4-31b-it:free",
+  "openai/gpt-oss-120b:free",
   "minimax/minimax-m2.5:free",
+  "openrouter/free",
   "openai/gpt-4o-mini",
 ]
 

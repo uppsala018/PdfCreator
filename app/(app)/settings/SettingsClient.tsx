@@ -30,7 +30,7 @@ interface SettingsClientProps {
 const PROVIDERS: Array<{ id: ProviderId; label: string; hint: string; modelHint: string }> = [
   { id: "openai", label: "OpenAI", hint: "OpenAI API or compatible OpenAI account key.", modelHint: "gpt-4o-mini" },
   { id: "anthropic", label: "Anthropic", hint: "Claude API key.", modelHint: "claude-haiku-4-5-20251001" },
-  { id: "openrouter", label: "OpenRouter", hint: "OpenRouter key for routed models.", modelHint: "openrouter/free" },
+  { id: "openrouter", label: "OpenRouter", hint: "OpenRouter key for routed models.", modelHint: "nvidia/nemotron-3-super-120b-a12b:free" },
   { id: "gemini", label: "Google Gemini", hint: "Gemini key via Google AI Studio.", modelHint: "gemini-2.0-flash" },
   { id: "mistral", label: "Mistral", hint: "Mistral API key.", modelHint: "mistral-small-latest" },
   { id: "custom", label: "Other / Custom", hint: "Self-hosted or custom AI endpoint.", modelHint: "model-name" },

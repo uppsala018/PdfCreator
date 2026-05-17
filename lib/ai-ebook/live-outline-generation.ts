@@ -74,7 +74,7 @@ export async function generateLiveStructuredOutline(
     return {
       outline,
       normalized,
-      diagnostics: [...diagnostics, ...normalized.issues],
+      diagnostics,
       provider: {
         id: response.providerId,
         model: response.model,
@@ -97,7 +97,7 @@ export async function generateLiveStructuredOutline(
     return {
       outline,
       normalized,
-      diagnostics: [fallbackIssue, ...diagnoseOutline(outline), ...normalized.issues],
+      diagnostics: [fallbackIssue, ...diagnoseOutline(outline)],
       provider: {
         id: provider.config.id,
         model: input.model ?? provider.config.defaultModel ?? "unknown",

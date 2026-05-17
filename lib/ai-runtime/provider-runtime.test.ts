@@ -181,7 +181,7 @@ describe("AI provider runtime", () => {
           displayName: "OpenRouter",
           baseUrl: "https://openrouter.ai/api/v1",
           defaultModel: "tencent/hy3-preview",
-          fallbackModels: ["openrouter/free", "openai/gpt-4o-mini"],
+          fallbackModels: ["nvidia/nemotron-3-super-120b-a12b:free", "openrouter/free", "openai/gpt-4o-mini"],
           apiKey: "test-key",
         })
       )
@@ -196,9 +196,9 @@ describe("AI provider runtime", () => {
         },
       })
 
-      expect(result.model).toBe("openrouter/free")
+      expect(result.model).toBe("nvidia/nemotron-3-super-120b-a12b:free")
       expect(result.json).toEqual({ ok: true })
-      expect(requestedModels).toEqual(["tencent/hy3-preview", "openrouter/free"])
+      expect(requestedModels).toEqual(["tencent/hy3-preview", "nvidia/nemotron-3-super-120b-a12b:free"])
     } finally {
       global.fetch = originalFetch
     }
