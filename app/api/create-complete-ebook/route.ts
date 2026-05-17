@@ -5,7 +5,11 @@ import type { AiEbookFormat, AiStructureIssue } from "@/lib/ai-ebook/ebook-gener
 import { generateLiveStructuredChapters } from "@/lib/ai-ebook/live-chapter-generation"
 import { generateLiveStructuredOutline } from "@/lib/ai-ebook/live-outline-generation"
 import { runControlledRegenerationLoop } from "@/lib/ai-ebook/regeneration-loop"
-import { resolveAIProvider, type UserAISettings } from "@/lib/ai-runtime/provider-resolution"
+import { resolveAIProvider } from "@/lib/ai-runtime/provider-resolution"
+import {
+  normalizeUserAISettings,
+  USER_AI_SETTINGS_COLUMNS,
+} from "@/lib/ai-runtime/provider-settings"
 import { normalizeSource } from "@/lib/ebook-ingestion/normalize-source"
 import type { ExportTheme } from "@/lib/export/theme-mapping"
 
@@ -56,29 +60,12 @@ export async function POST(request: NextRequest) {
 
   const { data: settings } = await supabase
     .from("user_settings")
-    .select([
-      "ai_provider",
-      "anthropic_key",
-      "anthropic_model",
-      "openai_key",
-      "openai_model",
-      "openrouter_key",
-      "openrouter_model",
-      "gemini_key",
-      "gemini_model",
-      "mistral_key",
-      "mistral_model",
-      "custom_provider_name",
-      "custom_api_key",
-      "custom_base_url",
-      "custom_model",
-      "custom_compatibility",
-    ].join(", "))
+    .select(USER_AI_SETTINGS_COLUMNS)
     .eq("user_id", user.id)
     .maybeSingle()
 
   const resolvedProvider = resolveAIProvider({
-    userSettings: settings as UserAISettings | null,
+    userSettings: normalizeUserAISettings(settings),
     preferredProviderId: input.providerId,
     model: input.model,
   })

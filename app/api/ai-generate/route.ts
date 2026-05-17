@@ -1,7 +1,10 @@
 import { type NextRequest, NextResponse } from "next/server"
 import { createClient } from "@/lib/supabase/server"
 import { generateText } from "@/lib/ai"
-import type { UserAISettings } from "@/lib/ai-runtime/provider-resolution"
+import {
+  normalizeUserAISettings,
+  USER_AI_SETTINGS_COLUMNS,
+} from "@/lib/ai-runtime/provider-settings"
 
 // ─── POST /api/ai-generate ────────────────────────────────────────────────────
 //
@@ -44,24 +47,7 @@ export async function POST(request: NextRequest) {
   // ── Load user API keys (server-side only — never returned to the client) ────
   const { data: settings } = await supabase
     .from("user_settings")
-    .select([
-      "ai_provider",
-      "anthropic_key",
-      "anthropic_model",
-      "openai_key",
-      "openai_model",
-      "openrouter_key",
-      "openrouter_model",
-      "gemini_key",
-      "gemini_model",
-      "mistral_key",
-      "mistral_model",
-      "custom_provider_name",
-      "custom_api_key",
-      "custom_base_url",
-      "custom_model",
-      "custom_compatibility",
-    ].join(", "))
+    .select(USER_AI_SETTINGS_COLUMNS)
     .eq("user_id", user.id)
     .maybeSingle()
 
@@ -70,7 +56,7 @@ export async function POST(request: NextRequest) {
     const result = await generateText({
       prompt: prompt.trim(),
       context: typeof context === "string" ? context : undefined,
-      userSettings: settings as UserAISettings | null,
+      userSettings: normalizeUserAISettings(settings),
     })
 
     return NextResponse.json({

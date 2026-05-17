@@ -11,6 +11,11 @@ import {
   resolveAIProvider,
   type UserAISettings,
 } from "@/lib/ai-runtime/provider-resolution"
+import {
+  buildUserAISettingsPatch,
+  normalizeUserAISettings,
+  publicAISettingsResponse,
+} from "@/lib/ai-runtime/provider-settings"
 
 function secrets(values: Record<string, string | undefined>) {
   return {
@@ -122,6 +127,57 @@ describe("AI provider runtime", () => {
       activeProvider: "openrouter",
       activeModel: "anthropic/claude-3.5-sonnet",
       keySource: "env",
+    })
+  })
+
+  it("builds a canonical OpenRouter settings patch", () => {
+    expect(
+      buildUserAISettingsPatch("user-1", {
+        ai_provider: "openrouter",
+        openrouter_key: "  sk-or-user-key  ",
+        openrouter_model: "  anthropic/claude-3.5-sonnet  ",
+      })
+    ).toEqual({
+      user_id: "user-1",
+      ai_provider: "openrouter",
+      openrouter_key: "sk-or-user-key",
+      openrouter_model: "anthropic/claude-3.5-sonnet",
+    })
+  })
+
+  it("loads masked OpenRouter key status without exposing the key", () => {
+    const response = publicAISettingsResponse({
+      ai_provider: "openrouter",
+      openrouter_key: "sk-or-secret1234",
+      openrouter_model: "anthropic/claude-3.5-sonnet",
+    })
+
+    expect(response).toMatchObject({
+      ai_provider: "openrouter",
+      openrouter_configured: true,
+      openrouter_masked: "sk-or-s••••1234",
+      openrouter_model: "anthropic/claude-3.5-sonnet",
+      providerStatus: {
+        activeProvider: "openrouter",
+        activeProviderName: "OpenRouter",
+        activeModel: "anthropic/claude-3.5-sonnet",
+        keySource: "user",
+      },
+    })
+    expect(JSON.stringify(response)).not.toContain("sk-or-secret1234")
+  })
+
+  it("normalizes compatible OpenRouter alias fields", () => {
+    expect(
+      normalizeUserAISettings({
+        ai_default_provider: "openrouter",
+        openrouter_api_key: "alias-key",
+        openrouter_model: "openai/gpt-4o-mini",
+      })
+    ).toMatchObject({
+      ai_provider: "openrouter",
+      openrouter_key: "alias-key",
+      openrouter_model: "openai/gpt-4o-mini",
     })
   })
 

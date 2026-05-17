@@ -15,36 +15,12 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import type { AICompatibilityMode } from "@/lib/ai-runtime/provider-types"
-import type { ActiveProviderStatus } from "@/lib/ai-runtime/provider-resolution"
+import type { PublicAISettingsState } from "@/lib/ai-runtime/provider-settings"
 import { cn } from "@/lib/utils"
 
 type ProviderId = "openai" | "anthropic" | "openrouter" | "gemini" | "mistral" | "custom"
 
-interface KeyState {
-  ai_provider: string | null
-  anthropic_configured: boolean
-  openai_configured: boolean
-  openrouter_configured: boolean
-  gemini_configured: boolean
-  mistral_configured: boolean
-  custom_configured: boolean
-  anthropic_masked: string | null
-  openai_masked: string | null
-  openrouter_masked: string | null
-  gemini_masked: string | null
-  mistral_masked: string | null
-  custom_masked: string | null
-  anthropic_model: string
-  openai_model: string
-  openrouter_model: string
-  gemini_model: string
-  mistral_model: string
-  custom_provider_name: string
-  custom_base_url: string
-  custom_model: string
-  custom_compatibility: AICompatibilityMode
-  providerStatus: ActiveProviderStatus
-}
+type KeyState = PublicAISettingsState
 
 interface SettingsClientProps {
   userEmail: string
@@ -191,6 +167,7 @@ function ProviderCard({
     setError(null)
     try {
       const patch: Record<string, string | null> = {
+        ai_provider: provider.id,
         [modelName(provider.id)]: model,
       }
       if (key.trim()) patch[keyName(provider.id)] = key.trim()
