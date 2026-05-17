@@ -71,10 +71,18 @@ export interface ResolvedAIProvider {
 const DEFAULT_MODELS: Record<Exclude<BuiltInAIProviderId, "custom" | "mock">, string> = {
   openai: "gpt-4o-mini",
   anthropic: "claude-haiku-4-5-20251001",
-  openrouter: "openai/gpt-4o-mini",
+  openrouter: "openrouter/free",
   gemini: "gemini-2.0-flash",
   mistral: "mistral-small-latest",
 }
+
+const OPENROUTER_FALLBACK_MODELS = [
+  "openrouter/free",
+  "nvidia/nemotron-3-super-120b-a12b:free",
+  "google/gemma-4-31b-it:free",
+  "minimax/minimax-m2.5:free",
+  "openai/gpt-4o-mini",
+]
 
 const ENV_PROVIDER_ORDER: BuiltInAIProviderId[] = [
   "anthropic",
@@ -168,7 +176,7 @@ export function buildProviders(
         apiKeyEnvVar: "OPENROUTER_API_KEY",
         defaultModel: firstValue(userSettings?.openrouter_model, secrets.get("OPENROUTER_MODEL"), DEFAULT_MODELS.openrouter),
         fallbackModel: firstValue(secrets.get("OPENROUTER_FALLBACK_MODEL")),
-        fallbackModels: ["openai/gpt-4o-mini"],
+        fallbackModels: OPENROUTER_FALLBACK_MODELS,
       })
     ),
     new OpenAICompatibleProvider(

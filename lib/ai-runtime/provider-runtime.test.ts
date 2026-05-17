@@ -181,7 +181,7 @@ describe("AI provider runtime", () => {
           displayName: "OpenRouter",
           baseUrl: "https://openrouter.ai/api/v1",
           defaultModel: "tencent/hy3-preview",
-          fallbackModels: ["openai/gpt-4o-mini"],
+          fallbackModels: ["openrouter/free", "openai/gpt-4o-mini"],
           apiKey: "test-key",
         })
       )
@@ -196,9 +196,9 @@ describe("AI provider runtime", () => {
         },
       })
 
-      expect(result.model).toBe("openai/gpt-4o-mini")
+      expect(result.model).toBe("openrouter/free")
       expect(result.json).toEqual({ ok: true })
-      expect(requestedModels).toEqual(["tencent/hy3-preview", "openai/gpt-4o-mini"])
+      expect(requestedModels).toEqual(["tencent/hy3-preview", "openrouter/free"])
     } finally {
       global.fetch = originalFetch
     }
