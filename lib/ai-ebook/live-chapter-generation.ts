@@ -119,6 +119,7 @@ function buildChapterPrompt(input: LiveChapterGenerationInput) {
     "Expand this outline into full structured ebook chapters.",
     "Return JSON with title, subtitle, brand, format, theme, chapters, cta.",
     "Use only these block types: paragraph, heading, subheading, bullet_list, numbered_list, tip_box, warning_box, key_takeaway, prompt_block, comparison_table, workflow_step, cta_box.",
+    "Every block must be usable: text blocks need non-empty text, lists need non-empty items, and tables need headers plus rows.",
     "Keep paragraphs concise. Include useful lists, callouts, prompts, tables, workflow steps, and chapter CTAs where appropriate.",
     "Do not return markdown. Do not return plain prose outside JSON.",
     "",
@@ -230,17 +231,35 @@ function normalizeSection(
   chapterIndex: number,
   sectionIndex: number
 ): AiSectionGeneration {
-  const blocks = Array.isArray(section.blocks) && section.blocks.length > 0
-    ? section.blocks.map(normalizeGeneratedBlock)
-    : fallbackBlocks(outlineSection?.title ?? section.title, input, chapterIndex, sectionIndex)
+  const title =
+    cleanString(section.title) ||
+    cleanString(outlineSection?.title) ||
+    `Section ${chapterIndex + 1}.${sectionIndex + 1}`
+  const normalizedBlocks = Array.isArray(section.blocks) && section.blocks.length > 0
+    ? section.blocks.map(normalizeGeneratedBlock).filter(hasUsableBlock)
+    : []
+  const blocks = normalizedBlocks.length > 0
+    ? normalizedBlocks
+    : fallbackBlocks(title, input, chapterIndex, sectionIndex)
 
   return {
-    title:
-      cleanString(section.title) ||
-      cleanString(outlineSection?.title) ||
-      `Section ${chapterIndex + 1}.${sectionIndex + 1}`,
+    title,
     blocks,
   }
+}
+
+function hasUsableBlock(block: AiBlockGeneration): boolean {
+  const type = cleanString(block.type)
+  if (type === "bullet_list" || type === "numbered_list") {
+    return Array.isArray((block as { items?: unknown[] }).items) && (block as { items?: unknown[] }).items!.some((item) => cleanString(item))
+  }
+  if (type === "comparison_table") {
+    const table = block as { headers?: unknown[]; rows?: unknown[][] }
+    return Array.isArray(table.headers) && table.headers.some((header) => cleanString(header)) &&
+      Array.isArray(table.rows) && table.rows.some((row) => Array.isArray(row) && row.some((cell) => cleanString(cell)))
+  }
+  if (type === "divider" || type === "spacer") return true
+  return blockText(block).trim() !== ""
 }
 
 function normalizeGeneratedBlock(block: AiBlockGeneration): AiBlockGeneration {
@@ -495,24 +514,29 @@ function fallbackBlocks(
 ): AiBlockGeneration[] {
   const audience = input.audience ?? "the reader"
   const title = sectionTitle ?? `Section ${chapterIndex + 1}.${sectionIndex + 1}`
+  const actionLabel = title.toLowerCase()
   return [
     {
       type: "paragraph",
-      text: `${title} gives ${audience} a practical way to move from idea to action without adding unnecessary complexity.`,
+      text: `${title} gives ${audience} a practical way to understand the topic, connect it to the chapter goal, and decide what matters most.`,
     },
     {
       type: "bullet_list",
-      items: ["Clarify the current obstacle.", "Choose the smallest useful action.", "Review the result before expanding the system."],
+      items: [
+        `Define what ${actionLabel} means in this chapter.`,
+        `Connect ${actionLabel} to the reader's main question.`,
+        `Summarize the clearest lesson before moving on.`,
+      ],
     },
     {
       type: "tip_box",
-      text: "Keep each chapter focused on one decision, one tool, and one useful next step.",
+      text: `Keep ${actionLabel} focused on one clear idea, one concrete example, and one useful takeaway.`,
     },
     generatePromptBlock(`Create an action checklist for ${title}`, audience) as AiBlockGeneration,
     {
       type: "workflow_step",
       title: "Apply the idea",
-      text: "Write the next concrete action, assign an owner, and decide when it will be reviewed.",
+      text: `Write one sentence explaining why ${actionLabel} matters, then connect it to the next section.`,
     },
   ]
 }

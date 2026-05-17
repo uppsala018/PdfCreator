@@ -111,6 +111,47 @@ describe("generateLiveStructuredChapters", () => {
     )
   })
 
+  it("replaces provider sections that contain only empty blocks before normalization", async () => {
+    const result = await generateLiveStructuredChapters({
+      outline,
+      audience: "students",
+      provider: new MockAIProvider({
+        structuredJson: {
+          ...outline,
+          chapters: [
+            {
+              title: "Gustav Vasa",
+              intro: "A Swedish history chapter.",
+              sections: [
+                {
+                  title: "Early life",
+                  blocks: [
+                    { type: "paragraph", text: "" },
+                    { type: "bullet_list", items: [] },
+                    { type: "tip_box", text: "   " },
+                  ],
+                },
+              ],
+            },
+          ],
+        },
+      }),
+    })
+
+    const blocks = result.composerReady.chapters[0].sections[0].blocks
+    expect(blocks.length).toBeGreaterThan(0)
+    expect(blocks).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ type: "paragraph", text: expect.stringContaining("Early life") }),
+      ])
+    )
+    expect(result.diagnostics).not.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ code: "EMPTY_BLOCKS_REPAIRED" }),
+      ])
+    )
+  })
+
   it("applies safeguards for oversized paragraphs and weak CTAs", async () => {
     const longParagraph = Array.from({ length: 80 }, () => "This repeated sentence supports the section.").join(" ")
     const result = await generateLiveStructuredChapters({
