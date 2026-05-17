@@ -45,6 +45,8 @@ export async function generateLiveStructuredChapters(
   try {
     const response = await provider.generateStructuredJson<unknown>({
       model: input.model,
+      temperature: 0.2,
+      maxOutputTokens: 2600,
       messages: [
         {
           role: "system",

@@ -105,7 +105,7 @@ export class OpenAICompatibleProvider implements AIProviderAdapter {
 
     const fallbackModels =
       this.config.kind === "openrouter"
-        ? uniqueModels([this.config.fallbackModel, ...(this.config.fallbackModels ?? [])])
+        ? uniqueModels([...(this.config.fallbackModels ?? []), this.config.fallbackModel]).slice(0, 2)
         : []
     if (!text && fallbackModels.length > 0) {
       for (const fallbackModel of fallbackModels) {

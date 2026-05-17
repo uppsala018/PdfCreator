@@ -93,7 +93,7 @@ export async function POST(request: NextRequest) {
   })
 
   const regeneration = runControlledRegenerationLoop(chapters.composerReady, {
-    maxPasses: 2,
+    maxPasses: 1,
   })
   const draft = composerEbookToEditorDraft(regeneration.ebook)
   const diagnostics: AiStructureIssue[] = [

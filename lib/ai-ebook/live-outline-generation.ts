@@ -49,6 +49,8 @@ export async function generateLiveStructuredOutline(
   try {
     const response = await provider.generateStructuredJson<unknown>({
       model: input.model,
+      temperature: 0.2,
+      maxOutputTokens: 900,
       messages: [
         {
           role: "system",
