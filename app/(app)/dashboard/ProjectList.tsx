@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useTransition } from "react"
+import { useState, useTransition, type ReactNode } from "react"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
 import {
@@ -13,6 +13,9 @@ import {
   User,
   Loader2,
   FileText,
+  Sparkles,
+  CheckCircle2,
+  CircleAlert,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -46,7 +49,57 @@ type ImportPdfError = {
   detail?: string
 }
 
+type AutopilotDiagnostic = {
+  code: string
+  severity: "info" | "warning" | "error"
+  message: string
+  suggestedFix: string
+  component?: string | null
+}
+
+type AutopilotDraft = {
+  title: string
+  subtitle: string
+  author: string
+  chapters: Array<{
+    id: string
+    title: string
+    blocks: unknown[]
+  }>
+}
+
+type AutopilotResponse = {
+  draft: AutopilotDraft
+  diagnostics: AutopilotDiagnostic[]
+  summary: {
+    title: string
+    subtitle: string
+    chapterCount: number
+    blockCount: number
+    diagnosticsCount: number
+    regenerationPasses: number
+    provider: {
+      id: string
+      model: string
+      usedFallback: boolean
+    }
+    source: null | {
+      inputKind: string
+      wordCount: number
+      sectionCount: number
+    }
+  }
+  regeneration?: {
+    passHistory?: Array<{
+      pass: number
+      improved: boolean
+      changes: string[]
+    }>
+  }
+}
+
 const MAX_IMPORT_PDF_BYTES = 50 * 1024 * 1024
+const MAX_AUTOPILOT_SOURCE_BYTES = 1.5 * 1024 * 1024
 
 function formatImportError(value: unknown): string {
   const json = value as ImportPdfError
@@ -86,6 +139,10 @@ function timeAgo(dateStr: string): string {
   })
 }
 
+function wait(ms: number) {
+  return new Promise((resolve) => window.setTimeout(resolve, ms))
+}
+
 // ─── New Project dialog form state ────────────────────────────────────────────
 
 type NewProjectForm = {
@@ -99,6 +156,48 @@ const EMPTY_FORM: NewProjectForm = {
   author: "",
   theme: "dark-cinematic",
 }
+
+type CompleteEbookForm = {
+  topic: string
+  audience: string
+  tone: string
+  ebookPreset: string
+  targetLength: "short" | "standard" | "long"
+  ctaGoal: string
+  theme: "luxury-black-gold" | "dark-cinematic" | "clean-minimal"
+  providerId: string
+  model: string
+}
+
+const EMPTY_COMPLETE_EBOOK_FORM: CompleteEbookForm = {
+  topic: "",
+  audience: "",
+  tone: "Clear, practical, premium",
+  ebookPreset: "luxury-lead-magnet",
+  targetLength: "standard",
+  ctaGoal: "",
+  theme: "luxury-black-gold",
+  providerId: "mock",
+  model: "mock-model",
+}
+
+type AutopilotPhase =
+  | "idle"
+  | "intake"
+  | "outline"
+  | "chapters"
+  | "diagnostics"
+  | "ready"
+  | "creating"
+  | "error"
+
+const AUTOPILOT_STEPS: Array<{ phase: AutopilotPhase; label: string }> = [
+  { phase: "intake", label: "Intake" },
+  { phase: "outline", label: "Outline" },
+  { phase: "chapters", label: "Chapters" },
+  { phase: "diagnostics", label: "Diagnostics" },
+  { phase: "ready", label: "Editor draft" },
+]
 
 // ─── Theme selector card ──────────────────────────────────────────────────────
 
@@ -254,7 +353,15 @@ function ProjectCard({
 
 // ─── Empty state ──────────────────────────────────────────────────────────────
 
-function EmptyState({ onNew, onImport }: { onNew: () => void; onImport: () => void }) {
+function EmptyState({
+  onNew,
+  onImport,
+  onAutopilot,
+}: {
+  onNew: () => void
+  onImport: () => void
+  onAutopilot: () => void
+}) {
   return (
     <div className="flex flex-col items-center justify-center py-24 text-center">
       <div className="mb-5 w-16 h-16 rounded-2xl bg-[#C9A84C]/10 border border-[#C9A84C]/20 flex items-center justify-center">
@@ -264,7 +371,14 @@ function EmptyState({ onNew, onImport }: { onNew: () => void; onImport: () => vo
       <p className="mt-2 text-sm text-slate-500 max-w-xs">
         Create your first ebook and start writing in minutes.
       </p>
-      <div className="mt-6 flex items-center gap-2">
+      <div className="mt-6 flex flex-wrap items-center justify-center gap-2">
+        <Button
+          onClick={onAutopilot}
+          className="bg-teal-500 font-semibold text-[#07111f] hover:bg-teal-400"
+        >
+          <Sparkles className="w-4 h-4 mr-1.5" />
+          Create Complete Ebook
+        </Button>
         <Button
           variant="outline"
           onClick={onImport}
@@ -285,6 +399,314 @@ function EmptyState({ onNew, onImport }: { onNew: () => void; onImport: () => vo
   )
 }
 
+function CompleteEbookDialog({
+  open,
+  form,
+  file,
+  phase,
+  error,
+  result,
+  onOpenChange,
+  onFormChange,
+  onFileChange,
+  onGenerate,
+  onCreateProject,
+}: {
+  open: boolean
+  form: CompleteEbookForm
+  file: File | null
+  phase: AutopilotPhase
+  error: string | null
+  result: AutopilotResponse | null
+  onOpenChange: (open: boolean) => void
+  onFormChange: (form: CompleteEbookForm) => void
+  onFileChange: (file: File | null) => void
+  onGenerate: () => Promise<void>
+  onCreateProject: () => Promise<void>
+}) {
+  const busy = phase === "intake" || phase === "outline" || phase === "chapters" || phase === "diagnostics" || phase === "creating"
+  const diagnostics = result?.diagnostics ?? []
+  const warnings = diagnostics.filter((diagnostic) => diagnostic.severity === "warning")
+  const errors = diagnostics.filter((diagnostic) => diagnostic.severity === "error")
+
+  function update<K extends keyof CompleteEbookForm>(key: K, value: CompleteEbookForm[K]) {
+    onFormChange({ ...form, [key]: value })
+  }
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="max-h-[92vh] overflow-y-auto border-[#1e3a52] bg-[#0a1929] text-white sm:max-w-3xl">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2 text-white">
+            <Sparkles className="h-4 w-4 text-teal-300" />
+            Create Complete Ebook
+          </DialogTitle>
+          <DialogDescription className="text-slate-400">
+            Generate a structured professional ebook, review diagnostics, then open it in the editor before export.
+          </DialogDescription>
+        </DialogHeader>
+
+        <div className="grid gap-2 sm:grid-cols-5">
+          {AUTOPILOT_STEPS.map((step) => {
+            const currentIndex = AUTOPILOT_STEPS.findIndex((item) => item.phase === phase)
+            const stepIndex = AUTOPILOT_STEPS.findIndex((item) => item.phase === step.phase)
+            const complete = currentIndex > stepIndex || phase === "ready"
+            const active = phase === step.phase
+            return (
+              <div
+                key={step.phase}
+                className={cn(
+                  "rounded-md border px-2 py-2 text-xs",
+                  active
+                    ? "border-teal-300/40 bg-teal-400/10 text-teal-100"
+                    : complete
+                      ? "border-emerald-400/20 bg-emerald-400/5 text-emerald-200"
+                      : "border-[#1e3a52] bg-[#07111f] text-slate-500"
+                )}
+              >
+                <div className="flex items-center gap-1.5">
+                  {complete ? (
+                    <CheckCircle2 className="h-3.5 w-3.5" />
+                  ) : active ? (
+                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                  ) : (
+                    <CircleAlert className="h-3.5 w-3.5" />
+                  )}
+                  {step.label}
+                </div>
+              </div>
+            )
+          })}
+        </div>
+
+        <div className="grid gap-4 lg:grid-cols-[1.1fr_0.9fr]">
+          <div className="space-y-4 rounded-lg border border-[#1e3a52] bg-[#07111f] p-4">
+            <div className="space-y-1.5">
+              <Label htmlFor="complete-topic" className="text-slate-300">
+                Topic prompt
+              </Label>
+              <textarea
+                id="complete-topic"
+                value={form.topic}
+                onChange={(event) => update("topic", event.target.value)}
+                placeholder="Create a premium ebook about client onboarding systems for consultants."
+                className="min-h-24 w-full rounded-md border border-[#1e3a52] bg-[#0D1B2A] px-3 py-2 text-sm text-white outline-none placeholder:text-slate-600 focus:border-teal-300/60"
+              />
+            </div>
+
+            <div className="grid gap-3 sm:grid-cols-2">
+              <WizardField label="Audience">
+                <Input
+                  value={form.audience}
+                  onChange={(event) => update("audience", event.target.value)}
+                  placeholder="Solo consultants"
+                  className="bg-[#0D1B2A] border-[#1e3a52] text-white"
+                />
+              </WizardField>
+              <WizardField label="Tone">
+                <Input
+                  value={form.tone}
+                  onChange={(event) => update("tone", event.target.value)}
+                  className="bg-[#0D1B2A] border-[#1e3a52] text-white"
+                />
+              </WizardField>
+              <WizardField label="Preset">
+                <select
+                  value={form.ebookPreset}
+                  onChange={(event) => update("ebookPreset", event.target.value)}
+                  className="h-9 w-full rounded-md border border-[#1e3a52] bg-[#0D1B2A] px-3 text-sm text-white outline-none"
+                >
+                  <option value="luxury-lead-magnet">Luxury Lead Magnet</option>
+                  <option value="consultant-guide">Consultant Guide</option>
+                  <option value="cinematic-ebook">Cinematic Ebook</option>
+                  <option value="educational-handbook">Educational Handbook</option>
+                  <option value="workbook">Workbook</option>
+                </select>
+              </WizardField>
+              <WizardField label="Target length">
+                <select
+                  value={form.targetLength}
+                  onChange={(event) => update("targetLength", event.target.value as CompleteEbookForm["targetLength"])}
+                  className="h-9 w-full rounded-md border border-[#1e3a52] bg-[#0D1B2A] px-3 text-sm text-white outline-none"
+                >
+                  <option value="short">Short</option>
+                  <option value="standard">Standard</option>
+                  <option value="long">Long</option>
+                </select>
+              </WizardField>
+              <WizardField label="CTA goal">
+                <Input
+                  value={form.ctaGoal}
+                  onChange={(event) => update("ctaGoal", event.target.value)}
+                  placeholder="Book a strategy call"
+                  className="bg-[#0D1B2A] border-[#1e3a52] text-white"
+                />
+              </WizardField>
+              <WizardField label="Theme">
+                <select
+                  value={form.theme}
+                  onChange={(event) => update("theme", event.target.value as CompleteEbookForm["theme"])}
+                  className="h-9 w-full rounded-md border border-[#1e3a52] bg-[#0D1B2A] px-3 text-sm text-white outline-none"
+                >
+                  <option value="luxury-black-gold">Luxury Black Gold</option>
+                  <option value="dark-cinematic">Dark Cinematic</option>
+                  <option value="clean-minimal">Clean Minimal</option>
+                </select>
+              </WizardField>
+              <WizardField label="Provider">
+                <select
+                  value={form.providerId}
+                  onChange={(event) => update("providerId", event.target.value)}
+                  className="h-9 w-full rounded-md border border-[#1e3a52] bg-[#0D1B2A] px-3 text-sm text-white outline-none"
+                >
+                  <option value="mock">Mock provider</option>
+                </select>
+              </WizardField>
+              <WizardField label="Model">
+                <Input
+                  value={form.model}
+                  onChange={(event) => update("model", event.target.value)}
+                  className="bg-[#0D1B2A] border-[#1e3a52] text-white"
+                />
+              </WizardField>
+            </div>
+
+            <div className="rounded-md border border-dashed border-[#1e3a52] bg-[#0D1B2A] p-3">
+              <Label htmlFor="complete-source" className="mb-2 block text-sm text-slate-300">
+                Optional source file
+              </Label>
+              <Input
+                id="complete-source"
+                type="file"
+                accept=".txt,.md,.markdown,text/plain,text/markdown"
+                disabled={busy}
+                onChange={(event) => onFileChange(event.target.files?.[0] ?? null)}
+                className="bg-[#07111f] border-[#1e3a52] text-slate-300 file:text-slate-200"
+              />
+              {file && (
+                <p className="mt-2 truncate text-xs text-slate-500">
+                  {file.name}
+                </p>
+              )}
+            </div>
+          </div>
+
+          <div className="space-y-3 rounded-lg border border-[#1e3a52] bg-[#07111f] p-4">
+            <div>
+              <p className="text-sm font-semibold text-white">Generation summary</p>
+              <p className="mt-1 text-xs leading-5 text-slate-500">
+                The generated draft opens in the editor, where content can be revised before Professional Composer export.
+              </p>
+            </div>
+
+            {result ? (
+              <div className="space-y-3">
+                <div className="rounded-md border border-[#1e3a52] bg-[#0D1B2A] p-3">
+                  <p className="text-sm font-semibold text-white">{result.draft.title}</p>
+                  <p className="mt-1 text-xs text-slate-400">{result.draft.subtitle}</p>
+                  <div className="mt-3 grid grid-cols-2 gap-2 text-xs">
+                    <SummaryTile label="Chapters" value={result.summary.chapterCount} />
+                    <SummaryTile label="Blocks" value={result.summary.blockCount} />
+                    <SummaryTile label="Diagnostics" value={result.summary.diagnosticsCount} />
+                    <SummaryTile label="Passes" value={result.summary.regenerationPasses} />
+                  </div>
+                </div>
+
+                <div className="rounded-md border border-amber-500/20 bg-amber-500/5 p-3 text-xs text-amber-100">
+                  <div className="flex items-center justify-between gap-2">
+                    <span>{errors.length} errors · {warnings.length} warnings</span>
+                    <span>{result.summary.provider.id}/{result.summary.provider.model}</span>
+                  </div>
+                  {diagnostics.slice(0, 4).map((diagnostic, index) => (
+                    <p key={`${diagnostic.code}-${index}`} className="mt-2 leading-5">
+                      <span className="font-semibold">{diagnostic.code}:</span> {diagnostic.message}
+                    </p>
+                  ))}
+                </div>
+
+                {result.regeneration?.passHistory?.length ? (
+                  <div className="rounded-md border border-[#1e3a52] bg-[#0D1B2A] p-3 text-xs text-slate-300">
+                    <p className="font-semibold text-white">Regeneration changes</p>
+                    {result.regeneration.passHistory.flatMap((pass) => pass.changes).slice(0, 5).map((change) => (
+                      <p key={change} className="mt-1 leading-5">{change}</p>
+                    ))}
+                  </div>
+                ) : null}
+              </div>
+            ) : (
+              <div className="rounded-md border border-[#1e3a52] bg-[#0D1B2A] p-3 text-sm text-slate-500">
+                Run generation to preview the draft summary and diagnostics.
+              </div>
+            )}
+
+            {error && (
+              <p className="rounded-md border border-red-500/20 bg-red-500/5 px-3 py-2 text-sm text-red-300">
+                {error}
+              </p>
+            )}
+          </div>
+        </div>
+
+        <DialogFooter className="gap-2 sm:gap-0">
+          <Button
+            type="button"
+            variant="outline"
+            onClick={() => onOpenChange(false)}
+            disabled={busy}
+            className="border-[#1e3a52] bg-transparent text-slate-300 hover:bg-white/5 hover:text-white"
+          >
+            Cancel
+          </Button>
+          <Button
+            type="button"
+            onClick={onGenerate}
+            disabled={busy || (!form.topic.trim() && !file)}
+            className="bg-teal-500 font-semibold text-[#07111f] hover:bg-teal-400"
+          >
+            {busy && phase !== "creating" ? (
+              <Loader2 className="mr-1.5 h-4 w-4 animate-spin" />
+            ) : (
+              <Sparkles className="mr-1.5 h-4 w-4" />
+            )}
+            {result ? "Regenerate" : "Generate"}
+          </Button>
+          <Button
+            type="button"
+            onClick={onCreateProject}
+            disabled={busy || !result}
+            className="bg-[#C9A84C] font-semibold text-[#0D1B2A] hover:bg-[#e0b85a]"
+          >
+            {phase === "creating" ? (
+              <Loader2 className="mr-1.5 h-4 w-4 animate-spin" />
+            ) : (
+              <ArrowRight className="mr-1.5 h-4 w-4" />
+            )}
+            Edit Before Export
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  )
+}
+
+function WizardField({ label, children }: { label: string; children: ReactNode }) {
+  return (
+    <label className="grid gap-1.5 text-xs font-medium text-slate-300">
+      {label}
+      {children}
+    </label>
+  )
+}
+
+function SummaryTile({ label, value }: { label: string; value: number | string }) {
+  return (
+    <div className="rounded border border-[#1e3a52] px-2 py-1.5">
+      <p className="text-[10px] uppercase tracking-widest text-slate-500">{label}</p>
+      <p className="mt-0.5 text-sm font-semibold text-white">{value}</p>
+    </div>
+  )
+}
+
 // ─── Main component ───────────────────────────────────────────────────────────
 
 export default function ProjectList({
@@ -300,6 +722,12 @@ export default function ProjectList({
   const [form, setForm] = useState<NewProjectForm>(EMPTY_FORM)
   const [isCreating, setIsCreating] = useState(false)
   const [createError, setCreateError] = useState<string | null>(null)
+  const [showAutopilotDialog, setShowAutopilotDialog] = useState(false)
+  const [autopilotForm, setAutopilotForm] = useState<CompleteEbookForm>(EMPTY_COMPLETE_EBOOK_FORM)
+  const [autopilotFile, setAutopilotFile] = useState<File | null>(null)
+  const [autopilotPhase, setAutopilotPhase] = useState<AutopilotPhase>("idle")
+  const [autopilotError, setAutopilotError] = useState<string | null>(null)
+  const [autopilotResult, setAutopilotResult] = useState<AutopilotResponse | null>(null)
   const [showImportDialog, setShowImportDialog] = useState(false)
   const [importFile, setImportFile] = useState<File | null>(null)
   const [isImporting, setIsImporting] = useState(false)
@@ -351,6 +779,130 @@ export default function ProjectList({
     } catch {
       setCreateError("Network error. Please try again.")
       setIsCreating(false)
+    }
+  }
+
+  function openAutopilotDialog() {
+    setAutopilotForm(EMPTY_COMPLETE_EBOOK_FORM)
+    setAutopilotFile(null)
+    setAutopilotPhase("idle")
+    setAutopilotError(null)
+    setAutopilotResult(null)
+    setShowAutopilotDialog(true)
+  }
+
+  async function handleGenerateCompleteEbook() {
+    if (!autopilotForm.topic.trim() && !autopilotFile) {
+      setAutopilotError("Add a topic prompt or upload a .txt/.md source file.")
+      return
+    }
+
+    setAutopilotError(null)
+    setAutopilotResult(null)
+    setAutopilotPhase("intake")
+
+    try {
+      let sourceText = ""
+      let sourceKind: "plain_text" | "markdown" = "plain_text"
+
+      if (autopilotFile) {
+        const name = autopilotFile.name.toLowerCase()
+        if (!name.endsWith(".txt") && !name.endsWith(".md") && !name.endsWith(".markdown")) {
+          setAutopilotError("Only .txt and .md source files are supported.")
+          setAutopilotPhase("error")
+          return
+        }
+        if (autopilotFile.size > MAX_AUTOPILOT_SOURCE_BYTES) {
+          setAutopilotError("Source file is too large. Use a file under 1.5 MB.")
+          setAutopilotPhase("error")
+          return
+        }
+        sourceKind = name.endsWith(".md") || name.endsWith(".markdown") ? "markdown" : "plain_text"
+        sourceText = await autopilotFile.text()
+      }
+
+      setAutopilotPhase("outline")
+      await wait(150)
+      setAutopilotPhase("chapters")
+
+      const res = await fetch("/api/create-complete-ebook", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          ...autopilotForm,
+          sourceText,
+          sourceKind,
+        }),
+      })
+
+      setAutopilotPhase("diagnostics")
+      const json = (await res.json().catch(() => ({}))) as Partial<AutopilotResponse> & { error?: string }
+      if (!res.ok || !json.draft || !json.summary) {
+        throw new Error(json.error ?? `Complete ebook generation failed (HTTP ${res.status})`)
+      }
+
+      setAutopilotResult(json as AutopilotResponse)
+      setAutopilotPhase("ready")
+    } catch (err) {
+      setAutopilotError(err instanceof Error ? err.message : "Complete ebook generation failed.")
+      setAutopilotPhase("error")
+    }
+  }
+
+  async function handleCreateAutopilotProject() {
+    if (!autopilotResult) return
+    setAutopilotPhase("creating")
+    setAutopilotError(null)
+
+    try {
+      const projectTheme =
+        autopilotForm.theme === "clean-minimal" ? "clean-minimal" : "dark-cinematic"
+      const createRes = await fetch("/api/projects", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          title: autopilotResult.draft.title,
+          author: autopilotResult.draft.author || undefined,
+          theme: projectTheme,
+        }),
+      })
+      const createJson = (await createRes.json().catch(() => ({}))) as {
+        error?: string
+        project?: { id?: string }
+      }
+      if (!createRes.ok || !createJson.project?.id) {
+        throw new Error(createJson.error ?? `Project creation failed (HTTP ${createRes.status})`)
+      }
+
+      const projectId = createJson.project.id
+      const patchRes = await fetch(`/api/projects/${projectId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          subtitle: autopilotResult.draft.subtitle,
+          author: autopilotResult.draft.author || null,
+          content: {
+            projectType: "ebook",
+            chapters: autopilotResult.draft.chapters,
+            autopilot: {
+              generatedAt: new Date().toISOString(),
+              summary: autopilotResult.summary,
+              diagnostics: autopilotResult.diagnostics,
+              regeneration: autopilotResult.regeneration ?? null,
+            },
+          },
+        }),
+      })
+      const patchJson = (await patchRes.json().catch(() => ({}))) as { error?: string }
+      if (!patchRes.ok) {
+        throw new Error(patchJson.error ?? `Project update failed (HTTP ${patchRes.status})`)
+      }
+
+      setShowAutopilotDialog(false)
+      router.push(`/editor/${projectId}`)
+    } catch (err) {
+      setAutopilotError(err instanceof Error ? err.message : "Could not create editor draft.")
+      setAutopilotPhase("error")
     }
   }
 
@@ -511,6 +1063,13 @@ export default function ProjectList({
           {projects.length > 0 && (
             <div className="flex items-center gap-2">
               <Button
+                onClick={openAutopilotDialog}
+                className="bg-teal-500 font-semibold text-[#07111f] hover:bg-teal-400"
+              >
+                <Sparkles className="w-4 h-4 mr-1.5" />
+                Create Complete Ebook
+              </Button>
+              <Button
                 variant="outline"
                 onClick={() => {
                   setImportFile(null)
@@ -537,6 +1096,7 @@ export default function ProjectList({
         {projects.length === 0 ? (
           <EmptyState
             onNew={openNewDialog}
+            onAutopilot={openAutopilotDialog}
             onImport={() => {
               setImportFile(null)
               setImportError(null)
@@ -653,6 +1213,24 @@ export default function ProjectList({
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      <CompleteEbookDialog
+        open={showAutopilotDialog}
+        form={autopilotForm}
+        file={autopilotFile}
+        phase={autopilotPhase}
+        error={autopilotError}
+        result={autopilotResult}
+        onOpenChange={(open) => {
+          if (autopilotPhase !== "intake" && autopilotPhase !== "outline" && autopilotPhase !== "chapters" && autopilotPhase !== "creating") {
+            setShowAutopilotDialog(open)
+          }
+        }}
+        onFormChange={setAutopilotForm}
+        onFileChange={setAutopilotFile}
+        onGenerate={handleGenerateCompleteEbook}
+        onCreateProject={handleCreateAutopilotProject}
+      />
 
       {/* ─── Import PDF dialog ─────────────────────────────────────────────── */}
       <Dialog
