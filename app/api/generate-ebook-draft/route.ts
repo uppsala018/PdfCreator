@@ -2,6 +2,7 @@ import { NextResponse, type NextRequest } from "next/server"
 import { createClient } from "@/lib/supabase/server"
 import { diagnoseAiGeneratedStructure } from "@/lib/ai-ebook/diagnostics"
 import { composerEbookToEditorDraft } from "@/lib/ai-ebook/editor-draft"
+import { repairComposerEbookContent } from "@/lib/ai-ebook/content-quality"
 import type { AiEbookFormat, AiGenerationRequest, AiStructureIssue } from "@/lib/ai-ebook/ebook-generation-schema"
 import { normalizeAiEbookGeneration } from "@/lib/ai-ebook/normalization"
 import { generateOutline } from "@/lib/ai-ebook/structured-outline"
@@ -39,15 +40,17 @@ export async function POST(request: NextRequest) {
 
   const generated = generateOutline(requestData)
   const normalized = normalizeAiEbookGeneration(generated)
+  const quality = repairComposerEbookContent(normalized.ebook)
   const diagnostics: AiStructureIssue[] = [
     ...normalized.issues,
-    ...diagnoseAiGeneratedStructure(normalized.ebook),
+    ...diagnoseAiGeneratedStructure(quality.ebook),
+    ...quality.issues,
   ]
-  const draft = composerEbookToEditorDraft(normalized.ebook)
+  const draft = composerEbookToEditorDraft(quality.ebook)
 
   return NextResponse.json({
     draft,
-    structuredEbook: normalized.ebook,
+    structuredEbook: quality.ebook,
     diagnostics,
     summary: {
       chapterCount: draft.chapters.length,

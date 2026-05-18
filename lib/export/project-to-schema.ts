@@ -1,4 +1,5 @@
 import type { Block, Chapter, ProjectRow } from "@/lib/project-schema"
+import { repairComposerEbookContent } from "@/lib/ai-ebook/content-quality"
 import { type ExportTheme, toComposerTheme } from "@/lib/export/theme-mapping"
 
 export type ComposerBlock =
@@ -42,7 +43,7 @@ export interface ComposerEbook {
 
 export function projectToProfessionalSchema(project: ProjectRow, theme: ExportTheme): ComposerEbook {
   const chapters = extractChapters(project.content)
-  return {
+  const schema: ComposerEbook = {
     title: project.title ?? "Untitled Ebook",
     subtitle: project.subtitle ?? "",
     author: project.author ?? "",
@@ -54,6 +55,7 @@ export function projectToProfessionalSchema(project: ProjectRow, theme: ExportTh
       "Created with Ebook Studio's Professional Composer: structured content, table of contents, premium styling, and layout diagnostics.",
     back_cover_cta: project.website ?? "ebook.studio",
   }
+  return repairComposerEbookContent(schema).ebook
 }
 
 function extractChapters(content: ProjectRow["content"]): Chapter[] {

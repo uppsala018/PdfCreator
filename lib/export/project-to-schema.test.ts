@@ -42,11 +42,11 @@ describe("projectToProfessionalSchema", () => {
     expect(schema.theme).toBe("black_gold")
     expect(schema.chapters[0].intro).toBe("Intro paragraph.")
     expect(schema.chapters[0].sections[0].title).toBe("Main Section")
-    expect(schema.chapters[0].sections[0].blocks.map((block) => block.type)).toEqual([
+    expect(schema.chapters[0].sections[0].blocks.map((block) => block.type)).toEqual(expect.arrayContaining([
       "subheading",
-      "tip_box",
-      "prompt_block",
+      "paragraph",
       "comparison_table",
-    ])
+    ]))
+    expect(schema.chapters[0].sections[0].blocks.some((block) => block.type === "prompt_block")).toBe(false)
   })
 })

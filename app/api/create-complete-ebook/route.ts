@@ -1,6 +1,7 @@
 import { NextResponse, type NextRequest } from "next/server"
 import { createClient } from "@/lib/supabase/server"
 import { composerEbookToEditorDraft } from "@/lib/ai-ebook/editor-draft"
+import { repairComposerEbookContent } from "@/lib/ai-ebook/content-quality"
 import type { AiEbookFormat, AiStructureIssue } from "@/lib/ai-ebook/ebook-generation-schema"
 import { generateLiveStructuredChapters } from "@/lib/ai-ebook/live-chapter-generation"
 import { generateLiveStructuredOutline } from "@/lib/ai-ebook/live-outline-generation"
@@ -171,17 +172,19 @@ async function generateCompleteEbook({
   const regeneration = runControlledRegenerationLoop(chapters.composerReady, {
     maxPasses: 1,
   })
-  const draft = composerEbookToEditorDraft(regeneration.ebook)
+  const quality = repairComposerEbookContent(regeneration.ebook)
+  const draft = composerEbookToEditorDraft(quality.ebook)
   const diagnostics: AiStructureIssue[] = [
     ...sourceDiagnostics(sourceDocument),
     ...outline.diagnostics,
     ...chapters.diagnostics,
     ...regeneration.finalDiagnostics,
+    ...quality.issues,
   ]
 
   return {
     draft,
-    regeneration,
+    regeneration: { ...regeneration, ebook: quality.ebook },
     chapters,
     diagnostics,
     providerStatus,

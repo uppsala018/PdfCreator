@@ -256,9 +256,9 @@ function repairSparseChapters(ebook: ComposerEbook, target: string | undefined, 
           {
             title: "Practical application",
             blocks: [
-              { type: "paragraph", text: "This section turns the chapter idea into a concrete decision and action." },
-              { type: "key_takeaway", text: "A useful chapter should leave the reader with one clear move." },
-              { type: "prompt_block", text: `Create a checklist for applying "${chapter.title}" this week.` },
+              { type: "paragraph", text: `This section explains how the ideas in "${chapter.title}" can be applied in a realistic situation.` },
+              { type: "paragraph", text: "The strongest next step is small, specific, and easy to review after the reader has tried it once." },
+              { type: "bullet_list", items: ["Identify the current situation.", "Choose one useful improvement.", "Review the result before adding more complexity."] },
             ],
           },
         ],

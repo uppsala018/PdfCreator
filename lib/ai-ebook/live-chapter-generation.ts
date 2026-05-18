@@ -1,6 +1,5 @@
 import type { AIProviderAdapter } from "@/lib/ai-runtime/provider-interface"
 import { MockAIProvider } from "@/lib/ai-runtime/providers/mock-provider"
-import { generatePromptBlock } from "@/lib/ai-ebook/block-generation"
 import type {
   AiBlockGeneration,
   AiChapterGeneration,
@@ -400,8 +399,8 @@ function ensureSectionVariety(
   issues.push(issue("LOW_STRUCTURE_VARIETY", "warning", `Section "${sectionTitle ?? "Untitled"}" has limited block variety.`, "Add lists, callouts, prompts, workflow steps, or tables."))
   return [
     ...blocks,
-    { type: "key_takeaway", text: `Focus on the one decision this section helps the reader make.` },
-    { type: "prompt_block", text: `Turn "${sectionTitle ?? "this section"}" into a concrete action plan with one next step.` },
+    { type: "key_takeaway", text: `${sectionTitle ?? "This section"} works best when it connects the main idea to a specific reader situation and a realistic next step.` },
+    { type: "paragraph", text: `A useful way to apply ${sectionTitle ?? "this section"} is to compare the advice with the reader's current routine, choose one improvement, and make the next step specific enough to act on.` },
   ]
 }
 
@@ -535,7 +534,10 @@ function fallbackBlocks(
       type: "tip_box",
       text: `Keep ${actionLabel} focused on one clear idea, one concrete example, and one useful takeaway.`,
     },
-    generatePromptBlock(`Create an action checklist for ${title}`, audience) as AiBlockGeneration,
+    {
+      type: "paragraph",
+      text: `${audience} can use this section by identifying the most relevant detail, applying it once, and reviewing whether it made the routine clearer or easier.`,
+    },
     {
       type: "workflow_step",
       title: "Apply the idea",
