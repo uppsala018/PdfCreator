@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useTransition, type ReactNode } from "react"
+import { useEffect, useState, useTransition, type ReactNode } from "react"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
 import {
@@ -30,6 +30,8 @@ import {
   DialogDescription,
 } from "@/components/ui/dialog"
 import { cn } from "@/lib/utils"
+import { ebookJobProgress } from "@/lib/ai-ebook/job-progress"
+import type { ProfessionalEbookPlan } from "@/lib/ai-ebook/generation-plan"
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -169,6 +171,20 @@ type CompleteEbookForm = {
   model: string
 }
 
+type ProfessionalEbookForm = CompleteEbookForm & {
+  desiredChapterCount: string
+  desiredTotalPages: string
+  minPagesPerChapter: string
+  sectionCountPerChapter: string
+  wordsPerPage: string
+  chapterDefinitions: string
+  includeImages: boolean
+  imageFrequency: "none" | "cover" | "per_chapter" | "every_x_pages" | "custom"
+  imageEveryPages: string
+  imageStylePrompt: string
+  imageProviderPreference: string
+}
+
 const EMPTY_COMPLETE_EBOOK_FORM: CompleteEbookForm = {
   topic: "",
   audience: "",
@@ -179,6 +195,31 @@ const EMPTY_COMPLETE_EBOOK_FORM: CompleteEbookForm = {
   theme: "luxury-black-gold",
   providerId: "",
   model: "",
+}
+
+const EMPTY_PROFESSIONAL_EBOOK_FORM: ProfessionalEbookForm = {
+  ...EMPTY_COMPLETE_EBOOK_FORM,
+  desiredChapterCount: "",
+  desiredTotalPages: "",
+  minPagesPerChapter: "",
+  sectionCountPerChapter: "",
+  wordsPerPage: "400",
+  chapterDefinitions: "",
+  includeImages: false,
+  imageFrequency: "none",
+  imageEveryPages: "",
+  imageStylePrompt: "",
+  imageProviderPreference: "",
+}
+
+type ProfessionalEbookJob = {
+  id: string
+  status: "planning" | "generating" | "ready" | "failed" | "finalized" | string
+  settings: ProfessionalEbookPlan
+  current_chapter_index: number
+  diagnostics: AutopilotDiagnostic[] | unknown
+  error: string | null
+  result_project_id: string | null
 }
 
 type AutopilotPhase =
@@ -357,10 +398,12 @@ function EmptyState({
   onNew,
   onImport,
   onAutopilot,
+  onProfessional,
 }: {
   onNew: () => void
   onImport: () => void
   onAutopilot: () => void
+  onProfessional: () => void
 }) {
   return (
     <div className="flex flex-col items-center justify-center py-24 text-center">
@@ -380,6 +423,13 @@ function EmptyState({
           Create Complete Ebook
         </Button>
         <Button
+          onClick={onProfessional}
+          className="bg-[#C9A84C] hover:bg-[#e0b85a] text-[#0D1B2A] font-semibold"
+        >
+          <Sparkles className="w-4 h-4 mr-1.5" />
+          Professional Ebook Agent
+        </Button>
+        <Button
           variant="outline"
           onClick={onImport}
           className="border-[#1e3a52] bg-transparent text-slate-300 hover:bg-white/5 hover:text-white"
@@ -389,7 +439,7 @@ function EmptyState({
         </Button>
         <Button
           onClick={onNew}
-          className="bg-[#C9A84C] hover:bg-[#e0b85a] text-[#0D1B2A] font-semibold"
+          className="bg-[#07111f] border border-[#1e3a52] hover:bg-white/5 text-slate-200 font-semibold"
         >
           <Plus className="w-4 h-4 mr-1.5" />
           Create first project
@@ -696,6 +746,215 @@ function CompleteEbookDialog({
   )
 }
 
+function ProfessionalEbookDialog({
+  open,
+  form,
+  job,
+  error,
+  busy,
+  onOpenChange,
+  onFormChange,
+  onCreateJob,
+  onContinue,
+  onFinalize,
+}: {
+  open: boolean
+  form: ProfessionalEbookForm
+  job: ProfessionalEbookJob | null
+  error: string | null
+  busy: boolean
+  onOpenChange: (open: boolean) => void
+  onFormChange: (form: ProfessionalEbookForm) => void
+  onCreateJob: () => Promise<void>
+  onContinue: () => Promise<void>
+  onFinalize: () => Promise<void>
+}) {
+  const plan = job?.settings
+  const progress = ebookJobProgress({
+    status: job?.status ?? "idle",
+    currentChapterIndex: job?.current_chapter_index ?? 0,
+    plan,
+  })
+  const diagnostics = Array.isArray(job?.diagnostics) ? job.diagnostics as AutopilotDiagnostic[] : []
+  const warningCount = diagnostics.filter((diagnostic) => diagnostic.severity === "warning").length
+
+  function update<K extends keyof ProfessionalEbookForm>(key: K, value: ProfessionalEbookForm[K]) {
+    onFormChange({ ...form, [key]: value })
+  }
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="max-h-[92vh] overflow-y-auto border-[#1e3a52] bg-[#0a1929] text-white sm:max-w-4xl">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2 text-white">
+            <Sparkles className="h-4 w-4 text-[#C9A84C]" />
+            Professional Ebook Agent
+          </DialogTitle>
+          <DialogDescription className="text-slate-400">
+            Create a resumable chapter-by-chapter ebook job for deeper books without request timeouts.
+          </DialogDescription>
+        </DialogHeader>
+
+        <div className="grid gap-4 lg:grid-cols-[1.1fr_0.9fr]">
+          <div className="space-y-4 rounded-lg border border-[#1e3a52] bg-[#07111f] p-4">
+            <WizardField label="One prompt">
+              <textarea
+                value={form.topic}
+                onChange={(event) => update("topic", event.target.value)}
+                placeholder="Write a 10 chapter professional ebook about the Council of Nicaea for students, at least 50 pages."
+                className="min-h-28 w-full rounded-md border border-[#1e3a52] bg-[#0D1B2A] px-3 py-2 text-sm text-white outline-none placeholder:text-slate-600 focus:border-teal-300/60"
+              />
+            </WizardField>
+
+            <div className="grid gap-3 sm:grid-cols-2">
+              <WizardField label="Audience">
+                <Input value={form.audience} onChange={(event) => update("audience", event.target.value)} className="bg-[#0D1B2A] border-[#1e3a52] text-white" />
+              </WizardField>
+              <WizardField label="Tone">
+                <Input value={form.tone} onChange={(event) => update("tone", event.target.value)} className="bg-[#0D1B2A] border-[#1e3a52] text-white" />
+              </WizardField>
+              <WizardField label="Chapters">
+                <Input value={form.desiredChapterCount} onChange={(event) => update("desiredChapterCount", event.target.value)} placeholder="10" className="bg-[#0D1B2A] border-[#1e3a52] text-white" />
+              </WizardField>
+              <WizardField label="Total pages">
+                <Input value={form.desiredTotalPages} onChange={(event) => update("desiredTotalPages", event.target.value)} placeholder="50" className="bg-[#0D1B2A] border-[#1e3a52] text-white" />
+              </WizardField>
+              <WizardField label="Min pages/chapter">
+                <Input value={form.minPagesPerChapter} onChange={(event) => update("minPagesPerChapter", event.target.value)} placeholder="2" className="bg-[#0D1B2A] border-[#1e3a52] text-white" />
+              </WizardField>
+              <WizardField label="Words/page estimate">
+                <Input value={form.wordsPerPage} onChange={(event) => update("wordsPerPage", event.target.value)} placeholder="400" className="bg-[#0D1B2A] border-[#1e3a52] text-white" />
+              </WizardField>
+              <WizardField label="Preset">
+                <select value={form.ebookPreset} onChange={(event) => update("ebookPreset", event.target.value)} className="h-9 w-full rounded-md border border-[#1e3a52] bg-[#0D1B2A] px-3 text-sm text-white outline-none">
+                  <option value="luxury-lead-magnet">Luxury Lead Magnet</option>
+                  <option value="consultant-guide">Consultant Guide</option>
+                  <option value="cinematic-ebook">Cinematic Ebook</option>
+                  <option value="educational-handbook">Educational Handbook</option>
+                  <option value="workbook">Workbook</option>
+                </select>
+              </WizardField>
+              <WizardField label="Theme">
+                <select value={form.theme} onChange={(event) => update("theme", event.target.value as ProfessionalEbookForm["theme"])} className="h-9 w-full rounded-md border border-[#1e3a52] bg-[#0D1B2A] px-3 text-sm text-white outline-none">
+                  <option value="luxury-black-gold">Luxury Black Gold</option>
+                  <option value="dark-cinematic">Dark Cinematic</option>
+                  <option value="clean-minimal">Clean Minimal</option>
+                </select>
+              </WizardField>
+              <WizardField label="Provider">
+                <select value={form.providerId} onChange={(event) => update("providerId", event.target.value)} className="h-9 w-full rounded-md border border-[#1e3a52] bg-[#0D1B2A] px-3 text-sm text-white outline-none">
+                  <option value="">Use Settings default</option>
+                  <option value="openrouter">OpenRouter</option>
+                  <option value="gemini">Google Gemini</option>
+                  <option value="openai">OpenAI</option>
+                  <option value="anthropic">Anthropic</option>
+                  <option value="mistral">Mistral</option>
+                  <option value="custom">Other / Custom</option>
+                </select>
+              </WizardField>
+              <WizardField label="Model">
+                <Input value={form.model} onChange={(event) => update("model", event.target.value)} placeholder="Use provider default" className="bg-[#0D1B2A] border-[#1e3a52] text-white" />
+              </WizardField>
+            </div>
+
+            <WizardField label="Manual chapter plan">
+              <textarea
+                value={form.chapterDefinitions}
+                onChange={(event) => update("chapterDefinitions", event.target.value)}
+                placeholder={"Chapter 1: Historical background\nChapter 2: The theological dispute\nChapter 3: Arius and Alexander"}
+                className="min-h-24 w-full rounded-md border border-[#1e3a52] bg-[#0D1B2A] px-3 py-2 text-sm text-white outline-none placeholder:text-slate-600"
+              />
+            </WizardField>
+
+            <div className="rounded-md border border-[#1e3a52] bg-[#0D1B2A] p-3">
+              <label className="flex items-center gap-2 text-sm text-slate-200">
+                <input type="checkbox" checked={form.includeImages} onChange={(event) => update("includeImages", event.target.checked)} />
+                Include AI image planning placeholders
+              </label>
+              {form.includeImages && (
+                <div className="mt-3 grid gap-3 sm:grid-cols-2">
+                  <WizardField label="Image frequency">
+                    <select value={form.imageFrequency} onChange={(event) => update("imageFrequency", event.target.value as ProfessionalEbookForm["imageFrequency"])} className="h-9 w-full rounded-md border border-[#1e3a52] bg-[#07111f] px-3 text-sm text-white outline-none">
+                      <option value="cover">Cover only</option>
+                      <option value="per_chapter">One per chapter</option>
+                      <option value="every_x_pages">Every X pages</option>
+                      <option value="custom">Custom</option>
+                    </select>
+                  </WizardField>
+                  <WizardField label="Every pages">
+                    <Input value={form.imageEveryPages} onChange={(event) => update("imageEveryPages", event.target.value)} placeholder="5" className="bg-[#07111f] border-[#1e3a52] text-white" />
+                  </WizardField>
+                  <WizardField label="Style prompt">
+                    <Input value={form.imageStylePrompt} onChange={(event) => update("imageStylePrompt", event.target.value)} placeholder="Editorial, premium, historically accurate" className="bg-[#07111f] border-[#1e3a52] text-white" />
+                  </WizardField>
+                  <WizardField label="Image provider preference">
+                    <Input value={form.imageProviderPreference} onChange={(event) => update("imageProviderPreference", event.target.value)} placeholder="future image provider" className="bg-[#07111f] border-[#1e3a52] text-white" />
+                  </WizardField>
+                </div>
+              )}
+            </div>
+          </div>
+
+          <div className="space-y-3 rounded-lg border border-[#1e3a52] bg-[#07111f] p-4">
+            <div className="rounded-md border border-[#1e3a52] bg-[#0D1B2A] p-3">
+              <div className="flex items-center justify-between gap-3 text-sm">
+                <span className="font-semibold text-white">{progress.label}</span>
+                <span className="text-slate-400">{progress.percent}%</span>
+              </div>
+              <div className="mt-3 h-2 overflow-hidden rounded-full bg-[#07111f]">
+                <div className="h-full rounded-full bg-teal-400 transition-all" style={{ width: `${progress.percent}%` }} />
+              </div>
+            </div>
+
+            {plan ? (
+              <div className="grid grid-cols-2 gap-2 text-xs">
+                <SummaryTile label="Pages" value={plan.totalPages} />
+                <SummaryTile label="Words" value={plan.targetWords} />
+                <SummaryTile label="Chapters" value={plan.chapterCount} />
+                <SummaryTile label="Warnings" value={(plan.warnings?.length ?? 0) + warningCount} />
+              </div>
+            ) : (
+              <div className="rounded-md border border-[#1e3a52] bg-[#0D1B2A] p-3 text-sm text-slate-500">
+                Create a job to see estimates, live progress, diagnostics, and finalize controls.
+              </div>
+            )}
+
+            {plan?.warnings?.length ? (
+              <div className="rounded-md border border-amber-500/20 bg-amber-500/5 p-3 text-xs text-amber-100">
+                {plan.warnings.map((warning) => <p key={warning} className="leading-5">{warning}</p>)}
+              </div>
+            ) : null}
+
+            {job?.error ? (
+              <p className="rounded-md border border-red-500/20 bg-red-500/5 px-3 py-2 text-sm text-red-300">{job.error}</p>
+            ) : null}
+            {error ? (
+              <p className="rounded-md border border-red-500/20 bg-red-500/5 px-3 py-2 text-sm text-red-300">{error}</p>
+            ) : null}
+          </div>
+        </div>
+
+        <DialogFooter className="gap-2 sm:gap-0">
+          <Button type="button" variant="outline" onClick={() => onOpenChange(false)} disabled={busy} className="border-[#1e3a52] bg-transparent text-slate-300 hover:bg-white/5 hover:text-white">
+            Close
+          </Button>
+          <Button type="button" onClick={onCreateJob} disabled={busy || Boolean(job) || !form.topic.trim()} className="bg-teal-500 font-semibold text-[#07111f] hover:bg-teal-400">
+            {busy && !job ? <Loader2 className="mr-1.5 h-4 w-4 animate-spin" /> : <Sparkles className="mr-1.5 h-4 w-4" />}
+            Create Job
+          </Button>
+          <Button type="button" onClick={onContinue} disabled={busy || !job || job.status === "ready" || job.status === "finalized"} className="bg-[#C9A84C] font-semibold text-[#0D1B2A] hover:bg-[#e0b85a]">
+            {busy && job ? <Loader2 className="mr-1.5 h-4 w-4 animate-spin" /> : <ArrowRight className="mr-1.5 h-4 w-4" />}
+            {job?.status === "failed" ? "Retry Step" : "Continue"}
+          </Button>
+          <Button type="button" onClick={onFinalize} disabled={busy || job?.status !== "ready"} className="bg-emerald-500 font-semibold text-[#07111f] hover:bg-emerald-400">
+            Finalize & Open
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  )
+}
+
 function WizardField({ label, children }: { label: string; children: ReactNode }) {
   return (
     <label className="grid gap-1.5 text-xs font-medium text-slate-300">
@@ -735,6 +994,11 @@ export default function ProjectList({
   const [autopilotPhase, setAutopilotPhase] = useState<AutopilotPhase>("idle")
   const [autopilotError, setAutopilotError] = useState<string | null>(null)
   const [autopilotResult, setAutopilotResult] = useState<AutopilotResponse | null>(null)
+  const [showProfessionalDialog, setShowProfessionalDialog] = useState(false)
+  const [professionalForm, setProfessionalForm] = useState<ProfessionalEbookForm>(EMPTY_PROFESSIONAL_EBOOK_FORM)
+  const [professionalJob, setProfessionalJob] = useState<ProfessionalEbookJob | null>(null)
+  const [professionalBusy, setProfessionalBusy] = useState(false)
+  const [professionalError, setProfessionalError] = useState<string | null>(null)
   const [showImportDialog, setShowImportDialog] = useState(false)
   const [importFile, setImportFile] = useState<File | null>(null)
   const [isImporting, setIsImporting] = useState(false)
@@ -743,6 +1007,16 @@ export default function ProjectList({
   const [deleteTargetId, setDeleteTargetId] = useState<string | null>(null)
   const [isDeleting, setIsDeleting] = useState(false)
   const [deleteError, setDeleteError] = useState<string | null>(null)
+
+  useEffect(() => {
+    if (!showProfessionalDialog || !professionalJob?.id) return
+    if (professionalJob.status === "finalized") return
+
+    const timer = window.setInterval(() => {
+      void refreshProfessionalJob(professionalJob.id, false)
+    }, 4000)
+    return () => window.clearInterval(timer)
+  }, [professionalJob?.id, professionalJob?.status, showProfessionalDialog])
 
   // ── Create project ──────────────────────────────────────────────────────────
 
@@ -796,6 +1070,91 @@ export default function ProjectList({
     setAutopilotError(null)
     setAutopilotResult(null)
     setShowAutopilotDialog(true)
+  }
+
+  function openProfessionalDialog() {
+    setProfessionalForm(EMPTY_PROFESSIONAL_EBOOK_FORM)
+    setProfessionalJob(null)
+    setProfessionalBusy(false)
+    setProfessionalError(null)
+    setShowProfessionalDialog(true)
+  }
+
+  async function refreshProfessionalJob(id: string, showErrors = true) {
+    try {
+      const res = await fetch(`/api/ebook-jobs/${id}`)
+      const json = (await res.json().catch(() => ({}))) as { job?: ProfessionalEbookJob; error?: string }
+      if (!res.ok || !json.job) {
+        if (showErrors) setProfessionalError(json.error ?? `Job refresh failed (HTTP ${res.status})`)
+        return
+      }
+      setProfessionalJob(json.job)
+    } catch {
+      if (showErrors) setProfessionalError("Could not refresh generation job.")
+    }
+  }
+
+  async function handleCreateProfessionalJob() {
+    if (!professionalForm.topic.trim()) {
+      setProfessionalError("Add a prompt before creating a professional ebook job.")
+      return
+    }
+
+    setProfessionalBusy(true)
+    setProfessionalError(null)
+    try {
+      const res = await fetch("/api/ebook-jobs", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(professionalForm),
+      })
+      const json = (await res.json().catch(() => ({}))) as { job?: ProfessionalEbookJob; error?: string }
+      if (!res.ok || !json.job) {
+        throw new Error(json.error ?? `Job creation failed (HTTP ${res.status})`)
+      }
+      setProfessionalJob(json.job)
+    } catch (err) {
+      setProfessionalError(err instanceof Error ? err.message : "Could not create professional ebook job.")
+    } finally {
+      setProfessionalBusy(false)
+    }
+  }
+
+  async function handleContinueProfessionalJob() {
+    if (!professionalJob) return
+    setProfessionalBusy(true)
+    setProfessionalError(null)
+    try {
+      const res = await fetch(`/api/ebook-jobs/${professionalJob.id}/step`, { method: "POST" })
+      const json = (await res.json().catch(() => ({}))) as { job?: ProfessionalEbookJob; error?: string }
+      if (!res.ok || !json.job) {
+        throw new Error(json.error ?? `Generation step failed (HTTP ${res.status})`)
+      }
+      setProfessionalJob(json.job)
+    } catch (err) {
+      setProfessionalError(err instanceof Error ? err.message : "Could not continue professional ebook job.")
+    } finally {
+      setProfessionalBusy(false)
+    }
+  }
+
+  async function handleFinalizeProfessionalJob() {
+    if (!professionalJob) return
+    setProfessionalBusy(true)
+    setProfessionalError(null)
+    try {
+      const res = await fetch(`/api/ebook-jobs/${professionalJob.id}/finalize`, { method: "POST" })
+      const json = (await res.json().catch(() => ({}))) as { project?: { id?: string }; error?: string }
+      if (!res.ok || !json.project?.id) {
+        throw new Error(json.error ?? `Finalize failed (HTTP ${res.status})`)
+      }
+      setShowProfessionalDialog(false)
+      router.push(`/editor/${json.project.id}`)
+    } catch (err) {
+      setProfessionalError(err instanceof Error ? err.message : "Could not finalize professional ebook job.")
+    } finally {
+      setProfessionalBusy(false)
+    }
   }
 
   async function handleGenerateCompleteEbook() {
@@ -1070,6 +1429,13 @@ export default function ProjectList({
           {projects.length > 0 && (
             <div className="flex items-center gap-2">
               <Button
+                onClick={openProfessionalDialog}
+                className="bg-[#C9A84C] hover:bg-[#e0b85a] text-[#0D1B2A] font-semibold"
+              >
+                <Sparkles className="w-4 h-4 mr-1.5" />
+                Professional Agent
+              </Button>
+              <Button
                 onClick={openAutopilotDialog}
                 className="bg-teal-500 font-semibold text-[#07111f] hover:bg-teal-400"
               >
@@ -1104,6 +1470,7 @@ export default function ProjectList({
           <EmptyState
             onNew={openNewDialog}
             onAutopilot={openAutopilotDialog}
+            onProfessional={openProfessionalDialog}
             onImport={() => {
               setImportFile(null)
               setImportError(null)
@@ -1237,6 +1604,21 @@ export default function ProjectList({
         onFileChange={setAutopilotFile}
         onGenerate={handleGenerateCompleteEbook}
         onCreateProject={handleCreateAutopilotProject}
+      />
+
+      <ProfessionalEbookDialog
+        open={showProfessionalDialog}
+        form={professionalForm}
+        job={professionalJob}
+        error={professionalError}
+        busy={professionalBusy}
+        onOpenChange={(open) => {
+          if (!professionalBusy) setShowProfessionalDialog(open)
+        }}
+        onFormChange={setProfessionalForm}
+        onCreateJob={handleCreateProfessionalJob}
+        onContinue={handleContinueProfessionalJob}
+        onFinalize={handleFinalizeProfessionalJob}
       />
 
       {/* ─── Import PDF dialog ─────────────────────────────────────────────── */}
