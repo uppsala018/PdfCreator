@@ -211,6 +211,69 @@ export interface Database {
           },
         ]
       }
+      ebook_generation_jobs: {
+        Row: {
+          id: string
+          user_id: string
+          status: string
+          topic: string
+          settings: Json
+          outline: Json | null
+          chapters: Json
+          diagnostics: Json
+          current_chapter_index: number
+          result_project_id: string | null
+          error: string | null
+          created_at: string
+          updated_at: string
+        }
+        Insert: {
+          id?: string
+          user_id: string
+          status?: string
+          topic: string
+          settings?: Json
+          outline?: Json | null
+          chapters?: Json
+          diagnostics?: Json
+          current_chapter_index?: number
+          result_project_id?: string | null
+          error?: string | null
+          created_at?: string
+          updated_at?: string
+        }
+        Update: {
+          id?: string
+          user_id?: string
+          status?: string
+          topic?: string
+          settings?: Json
+          outline?: Json | null
+          chapters?: Json
+          diagnostics?: Json
+          current_chapter_index?: number
+          result_project_id?: string | null
+          error?: string | null
+          created_at?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "ebook_generation_jobs_user_id_fkey"
+            columns: ["user_id"]
+            isOneToOne: false
+            referencedRelation: "users"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "ebook_generation_jobs_result_project_id_fkey"
+            columns: ["result_project_id"]
+            isOneToOne: false
+            referencedRelation: "projects"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
     }  // end Tables
     Views: Record<string, never>
     Functions: Record<string, never>
